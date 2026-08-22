@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?eclipse version="3.4"?>
+<plugin>
+  <extension point="org.eclipse.core.runtime.preferences">
+    <initializer class="com.casla.eclipse.ai.preferences.AiPreferenceInitializer"/>
+  </extension>
+
+  <extension point="org.eclipse.ui.preferencePages">
+    <page
+        id="com.casla.eclipse.ai.preferences"
+        name="AI Code Assistant"
+        class="com.casla.eclipse.ai.preferences.AiPreferencePage"/>
+  </extension>
+
+  <extension
+      point="org.eclipse.jdt.ui.javaCompletionProposalComputer"
+      id="com.casla.eclipse.ai.completion"
+      name="AI Code Completion">
+    <proposalCategory
+        icon="icons/ai.svg"/>
+    <javaCompletionProposalComputer
+        class="com.casla.eclipse.ai.completion.AiCompletionProposalComputer"
+        categoryId="com.casla.eclipse.ai.completion"
+        activate="true"
+        requiresUIThread="false"
+        needsSortingAfterFiltering="false">
+      <partition type="__dftl_partition_content_type"/>
+    </javaCompletionProposalComputer>
+  </extension>
+</plugin>

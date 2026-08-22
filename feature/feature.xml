@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feature
+    id="com.casla.eclipse.ai.feature"
+    label="Casla AI Code Assistant"
+    version="0.1.0"
+    provider-name="Casla Group">
+  <description>
+    AI-assisted Java code completion for Eclipse using an OpenAI-compatible endpoint.
+  </description>
+  <copyright>Copyright (c) 2026 Casla Group.</copyright>
+  <license url="LICENSE">MIT License</license>
+  <requires>
+    <import plugin="org.eclipse.platform" version="4.40.0" match="greaterOrEqual"/>
+    <import plugin="org.eclipse.jdt.ui"/>
+  </requires>
+  <plugin
+      id="com.casla.eclipse.ai"
+      download-size="0"
+      install-size="0"
+      version="0.0.0"
+      unpack="false"/>
+</feature>

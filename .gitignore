@@ -1,0 +1,9 @@
+/bin/
+/build/
+/dist/
+/.metadata/
+*.log
+*.class
+*.jar
+*.zip
+!gradle/wrapper/*.jar
