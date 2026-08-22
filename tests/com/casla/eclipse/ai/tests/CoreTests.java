@@ -4,10 +4,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.eclipse.jface.text.Document;
+
 import com.casla.eclipse.ai.api.ConnectionConfig;
 import com.casla.eclipse.ai.api.ModelInfo;
 import com.casla.eclipse.ai.completion.CodeContext;
 import com.casla.eclipse.ai.completion.CompletionSanitizer;
+import com.casla.eclipse.ai.completion.abap.AbapStructureHint;
 import com.casla.eclipse.ai.internal.json.Json;
 import com.casla.eclipse.ai.runtime.ModelResolver;
 
@@ -25,6 +28,11 @@ public final class CoreTests {
         testRemoteHttpRejected();
         testCompletionFenceRemoval();
         testCompletionDeduplication();
+        testAbapStructureHintInDefinitionSection();
+        testAbapStructureHintInsideMethodImplementation();
+        testAbapStructureHintBetweenMethods();
+        testAbapStructureHintOutsideAnyClass();
+        testModelResolverPrefersLowEffortModel();
         System.out.println("Core tests passed: " + passed);
     }
 
@@ -108,12 +116,110 @@ public final class CoreTests {
         check(!result.endsWith("\n}"), "Repeated suffix removal");
     }
 
+    private static void testAbapStructureHintInDefinitionSection() {
+        // Reproduces the reported bug: cursor between two METHODS declarations
+        // inside a DEFINITION's PUBLIC SECTION suggested a full METHOD/ENDMETHOD
+        // implementation, which is only legal in an IMPLEMENTATION block.
+        String source = """
+            CLASS zcl_test_claude DEFINITION
+              PUBLIC
+              FINAL
+              CREATE PUBLIC .
+
+              PUBLIC SECTION.
+                METHODS run
+                  RETURNING VALUE(result) TYPE string.
+
+                METHODS get_max
+                  IMPORTING it_table      TYPE ty_numbers
+                  RETURNING VALUE(result) TYPE i.
+                methods get_min
+                  IMPORTING it_table      TYPE ty_numbers
+            <CURSOR>
+              PROTECTED SECTION.
+              PRIVATE SECTION.
+            ENDCLASS.
+            """;
+        String hint = AbapStructureHint.scan(document(source), source.indexOf("<CURSOR>"));
+        check(
+            "Class ZCL_TEST_CLAUDE, DEFINITION, PUBLIC SECTION".equals(hint),
+            "ABAP structure hint identifies DEFINITION + PUBLIC SECTION: was '" + hint + "'"
+        );
+    }
+
+    private static void testAbapStructureHintInsideMethodImplementation() {
+        String source = """
+            CLASS zcl_test_claude IMPLEMENTATION.
+              METHOD run.
+                result = |Hello|.
+              ENDMETHOD.
+
+              METHOD get_max.
+            <CURSOR>
+              ENDMETHOD.
+            ENDCLASS.
+            """;
+        String hint = AbapStructureHint.scan(document(source), source.indexOf("<CURSOR>"));
+        check(
+            "Class ZCL_TEST_CLAUDE, IMPLEMENTATION, inside METHOD GET_MAX".equals(hint),
+            "ABAP structure hint identifies enclosing METHOD: was '" + hint + "'"
+        );
+    }
+
+    private static void testAbapStructureHintBetweenMethods() {
+        String source = """
+            CLASS zcl_test_claude IMPLEMENTATION.
+              METHOD run.
+                result = |Hello|.
+              ENDMETHOD.
+            <CURSOR>
+              METHOD get_max.
+              ENDMETHOD.
+            ENDCLASS.
+            """;
+        String hint = AbapStructureHint.scan(document(source), source.indexOf("<CURSOR>"));
+        check(
+            "Class ZCL_TEST_CLAUDE, IMPLEMENTATION, between methods".equals(hint),
+            "ABAP structure hint reports between methods: was '" + hint + "'"
+        );
+    }
+
+    private static void testAbapStructureHintOutsideAnyClass() {
+        String source = """
+            ENDCLASS.
+            <CURSOR>
+            CLASS zcl_other DEFINITION.
+            """;
+        String hint = AbapStructureHint.scan(document(source), source.indexOf("<CURSOR>"));
+        check(hint.isEmpty(), "ABAP structure hint is empty outside any class: was '" + hint + "'");
+    }
+
+    private static void testModelResolverPrefersLowEffortModel() {
+        java.util.LinkedHashMap<String, Object> heavy = new java.util.LinkedHashMap<>();
+        heavy.put("reasoning", true);
+        heavy.put("thinkingCanDisable", false);
+        java.util.LinkedHashMap<String, Object> light = new java.util.LinkedHashMap<>();
+        light.put("reasoning", true);
+        light.put("thinkingCanDisable", true);
+
+        List<ModelInfo> models = List.of(
+            new ModelInfo("ag/claude-opus-4-6-thinking", "ag", heavy),
+            new ModelInfo("ag/gemini-3.5-flash-extra-low", "ag", light)
+        );
+        String resolved = new ModelResolver().resolve(models, "", Set.of()).orElseThrow();
+        check("ag/gemini-3.5-flash-extra-low".equals(resolved), "Resolver prefers the low-latency model");
+    }
+
+    private static Document document(String text) {
+        return new Document(text.replace("<CURSOR>", ""));
+    }
+
     private static ModelInfo model(String id) {
         return new ModelInfo(id, "test", Map.of());
     }
 
     private static CodeContext context(String before, String after) {
-        return new CodeContext("p", "/A.java", "Java", "", "", before, after, before.length(), 1L, "x");
+        return new CodeContext("p", "/A.java", "Java", "", "", "", before, after, before.length(), 1L, "x");
     }
 
     private static void check(boolean condition, String name) {
