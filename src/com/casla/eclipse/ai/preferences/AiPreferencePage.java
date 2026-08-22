@@ -197,7 +197,7 @@ public final class AiPreferencePage extends PreferencePage implements IWorkbench
         automaticSuggestionButton.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 4, 1));
 
         Label note = new Label(group, SWT.WRAP);
-        note.setText("Automatic mode opens the standard Eclipse Content Assist popup after a short pause. It is disabled by default.");
+        note.setText("Automatic mode shows an inline ghost-text suggestion after a short pause. Press Tab to accept it, Esc to dismiss it.");
         note.setLayoutData(new GridData(SWT.FILL, SWT.TOP, true, false, 4, 1));
     }
 

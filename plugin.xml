@@ -12,12 +12,26 @@
         class="com.casla.eclipse.ai.preferences.AiPreferencePage"/>
   </extension>
 
+  <!--
+    The extension id must stay unqualified. Eclipse builds the unique id as
+    <plugin-id>.<id> without checking whether the id already repeats the
+    namespace, so id="com.casla.eclipse.ai.completion" would register the
+    category as com.casla.eclipse.ai.com.casla.eclipse.ai.completion, the
+    categoryId below would resolve to nothing, and JDT would silently drop
+    the computer. This matches how JDT declares its own categories.
+  -->
   <extension
       point="org.eclipse.jdt.ui.javaCompletionProposalComputer"
-      id="com.casla.eclipse.ai.completion"
+      id="completion"
       name="AI Code Completion">
     <proposalCategory
         icon="icons/ai.svg"/>
+  </extension>
+
+  <extension
+      point="org.eclipse.jdt.ui.javaCompletionProposalComputer"
+      id="completionComputer"
+      name="AI Code Completion">
     <javaCompletionProposalComputer
         class="com.casla.eclipse.ai.completion.AiCompletionProposalComputer"
         categoryId="com.casla.eclipse.ai.completion"
@@ -26,5 +40,21 @@
         needsSortingAfterFiltering="false">
       <partition type="__dftl_partition_content_type"/>
     </javaCompletionProposalComputer>
+  </extension>
+
+  <!--
+    ABAP source files are edited by SAP's ABAP Development Tools (ADT), which
+    has its own editor and content-assist framework separate from JDT, so the
+    javaCompletionProposalComputer extension above never fires for them. ADT
+    exposes com.sap.adt.tools.abapsource.ui.clientProposalProvider for exactly
+    this purpose. If ADT is not installed this point does not exist and
+    Eclipse simply ignores the extension (see the matching optional
+    Require-Bundle entries in META-INF/MANIFEST.MF).
+  -->
+  <extension point="com.sap.adt.tools.abapsource.ui.clientProposalProvider">
+    <clientProposalProvider
+        class="com.casla.eclipse.ai.completion.abap.AiAbapProposalsProvider"
+        name="AI Code Completion (ABAP)">
+    </clientProposalProvider>
   </extension>
 </plugin>
