@@ -14,12 +14,18 @@ public record CodeContext(
     String language,
     String packageName,
     String imports,
+    /** Free-text structural signal (e.g. enclosing ABAP class/section/method); "" when unknown. */
+    String structureHint,
     String beforeCursor,
     String afterCursor,
     int cursorOffset,
     long modificationStamp,
     String fingerprint
 ) {
+    public CodeContext {
+        structureHint = structureHint == null ? "" : structureHint;
+    }
+
     public boolean isCurrent(IDocument document) {
         if (document == null || document.getLength() < cursorOffset) return false;
         if (document instanceof IDocumentExtension4 extension) {

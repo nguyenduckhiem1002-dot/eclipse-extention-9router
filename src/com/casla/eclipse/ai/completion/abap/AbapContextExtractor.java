@@ -32,6 +32,7 @@ final class AbapContextExtractor {
             "ABAP",
             "",
             "",
+            AbapStructureHint.scan(document, safeOffset),
             document.get(beforeStart, safeOffset - beforeStart),
             document.get(safeOffset, afterEnd - safeOffset),
             safeOffset,

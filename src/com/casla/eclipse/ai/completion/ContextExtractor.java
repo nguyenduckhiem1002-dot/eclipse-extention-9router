@@ -38,6 +38,7 @@ public final class ContextExtractor {
             "Java",
             findPackage(fullDocument),
             findImports(fullDocument),
+            "",
             document.get(beforeStart, safeOffset - beforeStart),
             document.get(safeOffset, afterEnd - safeOffset),
             safeOffset,

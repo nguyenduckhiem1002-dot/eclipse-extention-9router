@@ -36,6 +36,7 @@ import org.eclipse.ui.texteditor.ITextEditor;
 import com.casla.eclipse.ai.AiPlugin;
 import com.casla.eclipse.ai.api.CompletionSettings;
 import com.casla.eclipse.ai.client.ApiException;
+import com.casla.eclipse.ai.completion.abap.AbapStructureHint;
 import com.casla.eclipse.ai.client.CompletionResponse;
 import com.casla.eclipse.ai.preferences.AiPreferences;
 import com.casla.eclipse.ai.runtime.AiRuntime;
@@ -267,12 +268,14 @@ public final class GhostTextController implements IPartListener2, IDocumentListe
 
         String label = editor == null || editor.getEditorInput() == null ? "" : editor.getEditorInput().getName();
         String language = label.endsWith(".java") ? "Java" : "ABAP";
+        String structureHint = language.equals("ABAP") ? AbapStructureHint.scan(doc, offset) : "";
         return new CodeContext(
             "",
             label,
             language,
             "",
             "",
+            structureHint,
             doc.get(beforeStart, offset - beforeStart),
             doc.get(offset, afterEnd - offset),
             offset,
