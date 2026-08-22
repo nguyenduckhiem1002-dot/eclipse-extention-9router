@@ -23,14 +23,35 @@ import org.eclipse.jface.text.IDocument;
 public final class AbapStructureHint {
     private static final Pattern CLASS_HEADER =
         Pattern.compile("^CLASS\\s+(\\S+)\\s+(DEFINITION|IMPLEMENTATION)\\b");
-    private static final Pattern METHOD_HEADER = Pattern.compile("^METHOD\\s+(\\S+)\\s*\\.$");
-    private static final Pattern END_CLASS = Pattern.compile("^ENDCLASS\\s*\\.$");
-    private static final Pattern END_METHOD = Pattern.compile("^ENDMETHOD\\s*\\.$");
+    private static final Pattern METHOD_HEADER = Pattern.compile("^METHOD\\s+(\\S+)\\s*\\.(?:\\s*\".*)?$");
+    private static final Pattern END_CLASS = Pattern.compile("^ENDCLASS\\s*\\.(?:\\s*\".*)?$");
+    private static final Pattern END_METHOD = Pattern.compile("^ENDMETHOD\\s*\\.(?:\\s*\".*)?$");
+
+    private record ScanResult(String className, String mode, String sectionName, String methodName, boolean methodClosed) {}
 
     private AbapStructureHint() {}
 
     public static String scan(IDocument document, int offset) {
-        if (document == null) return "";
+        ScanResult result = scanInternal(document, offset);
+        return result == null ? "" : describe(result);
+    }
+
+    /**
+     * The name of the METHOD the cursor is textually inside, when scanning
+     * back reaches an IMPLEMENTATION block without first crossing an
+     * ENDMETHOD; "" for DEFINITION, between methods, or no enclosing class.
+     * Used to look up the matching METHODS signature from the DEFINITION
+     * section (see AbapMethodSignatureLookup) so completions inside a method
+     * body know the real parameter names instead of guessing.
+     */
+    public static String enclosingMethodName(IDocument document, int offset) {
+        ScanResult result = scanInternal(document, offset);
+        if (result == null || !"IMPLEMENTATION".equals(result.mode()) || result.methodClosed()) return "";
+        return result.methodName() == null ? "" : result.methodName();
+    }
+
+    private static ScanResult scanInternal(IDocument document, int offset) {
+        if (document == null) return null;
         try {
             int startLine = document.getLineOfOffset(Math.max(0, Math.min(offset, document.getLength())));
             String methodName = null;
@@ -44,10 +65,10 @@ public final class AbapStructureHint {
 
                 Matcher classMatcher = CLASS_HEADER.matcher(upper);
                 if (classMatcher.find()) {
-                    return describe(classMatcher.group(1), classMatcher.group(2), sectionName, methodName, methodClosed);
+                    return new ScanResult(classMatcher.group(1), classMatcher.group(2), sectionName, methodName, methodClosed);
                 }
                 if (END_CLASS.matcher(upper).matches()) {
-                    return "";
+                    return null;
                 }
 
                 if (methodName == null && !methodClosed) {
@@ -65,23 +86,21 @@ public final class AbapStructureHint {
                     else if (upper.startsWith("PRIVATE SECTION")) sectionName = "PRIVATE SECTION";
                 }
             }
-            return "";
+            return null;
         } catch (BadLocationException error) {
-            return "";
+            return null;
         }
     }
 
-    private static String describe(
-        String className, String mode, String sectionName, String methodName, boolean methodClosed
-    ) {
-        if ("DEFINITION".equals(mode)) {
-            return sectionName == null
-                ? "Class " + className + ", DEFINITION"
-                : "Class " + className + ", DEFINITION, " + sectionName;
+    private static String describe(ScanResult r) {
+        if ("DEFINITION".equals(r.mode())) {
+            return r.sectionName() == null
+                ? "Class " + r.className() + ", DEFINITION"
+                : "Class " + r.className() + ", DEFINITION, " + r.sectionName();
         }
-        return methodName != null && !methodClosed
-            ? "Class " + className + ", IMPLEMENTATION, inside METHOD " + methodName
-            : "Class " + className + ", IMPLEMENTATION, between methods";
+        return r.methodName() != null && !r.methodClosed()
+            ? "Class " + r.className() + ", IMPLEMENTATION, inside METHOD " + r.methodName()
+            : "Class " + r.className() + ", IMPLEMENTATION, between methods";
     }
 
     private static String lineText(IDocument document, int line) throws BadLocationException {

@@ -1,5 +1,8 @@
 package com.casla.eclipse.ai.completion.abap;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import org.eclipse.jface.text.BadLocationException;
 import org.eclipse.jface.text.IDocument;
 import org.eclipse.jface.text.IDocumentExtension4;
@@ -8,6 +11,9 @@ import org.eclipse.ui.PlatformUI;
 
 import com.casla.eclipse.ai.api.CompletionSettings;
 import com.casla.eclipse.ai.completion.CodeContext;
+import com.casla.eclipse.ai.completion.ContextExtractor;
+import com.casla.eclipse.ai.completion.CursorContextType;
+import com.casla.eclipse.ai.completion.RelatedFileCollector;
 
 /**
  * ADT hands the content-assist provider only an ITextViewer and an offset --
@@ -18,27 +24,60 @@ import com.casla.eclipse.ai.completion.CodeContext;
  * editor's input name, the closest thing to a project/file identity ADT
  * exposes here (no package/import equivalent is attempted).
  */
-final class AbapContextExtractor {
-    CodeContext extract(IDocument document, int offset, CompletionSettings settings) throws BadLocationException {
+public final class AbapContextExtractor {
+    public CodeContext extract(IDocument document, int offset, CompletionSettings settings) throws BadLocationException {
+        return extract(document, offset, activeEditorLabel(), settings);
+    }
+
+    public CodeContext extract(IDocument document, int offset, String label, CompletionSettings settings) throws BadLocationException {
         int safeOffset = Math.max(0, Math.min(offset, document.getLength()));
         String fullDocument = document.get();
 
         int beforeStart = startOfLine(document, Math.max(0, safeOffset - settings.contextBefore()));
         int afterEnd = endOfLine(document, Math.min(document.getLength(), safeOffset + settings.contextAfter()));
 
+        String actualLabel = label != null && !label.isBlank() ? label : activeEditorLabel();
+        CursorContextType contextType = ContextExtractor.detectCursorContext(fullDocument, safeOffset, "ABAP");
+        String structureHint = AbapStructureHint.scan(document, safeOffset);
+        List<RelatedFileCollector.RelatedFile> relatedFiles =
+            withMethodSignature(new RelatedFileCollector().collect(null, actualLabel), fullDocument, document, safeOffset);
+
         return new CodeContext(
             "",
-            activeEditorLabel(),
+            actualLabel,
             "ABAP",
             "",
             "",
-            AbapStructureHint.scan(document, safeOffset),
+            structureHint,
             document.get(beforeStart, safeOffset - beforeStart),
             document.get(safeOffset, afterEnd - safeOffset),
             safeOffset,
             modificationStamp(document),
-            CodeContext.fingerprint(fullDocument, safeOffset)
+            CodeContext.fingerprint(fullDocument, safeOffset),
+            contextType,
+            relatedFiles
         );
+    }
+
+    /**
+     * Inside a METHOD body, the prompt otherwise never sees the
+     * IMPORTING/EXPORTING/RETURNING parameter names declared on the matching
+     * METHODS line in DEFINITION -- so completions guess at them instead of
+     * using the real ones. When found, put it first: it's the single most
+     * relevant piece of context for the exact position being completed.
+     */
+    private static List<RelatedFileCollector.RelatedFile> withMethodSignature(
+        List<RelatedFileCollector.RelatedFile> collected, String fullDocument, IDocument document, int offset
+    ) {
+        String methodName = AbapStructureHint.enclosingMethodName(document, offset);
+        if (methodName.isBlank()) return collected;
+        String signature = AbapMethodSignatureLookup.find(fullDocument, methodName);
+        if (signature.isBlank()) return collected;
+
+        List<RelatedFileCollector.RelatedFile> withSignature = new ArrayList<>(collected.size() + 1);
+        withSignature.add(new RelatedFileCollector.RelatedFile("(DEFINITION) " + methodName + " signature", signature));
+        withSignature.addAll(collected);
+        return withSignature;
     }
 
     private static int startOfLine(IDocument document, int offset) throws BadLocationException {
