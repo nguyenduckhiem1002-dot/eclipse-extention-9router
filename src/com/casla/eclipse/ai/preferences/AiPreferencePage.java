@@ -1,6 +1,8 @@
 package com.casla.eclipse.ai.preferences;
 
+import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 
 import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.core.runtime.IStatus;
@@ -8,6 +10,7 @@ import org.eclipse.core.runtime.Status;
 import org.eclipse.core.runtime.jobs.Job;
 import org.eclipse.jface.preference.PreferencePage;
 import org.eclipse.swt.SWT;
+import org.eclipse.swt.custom.ScrolledComposite;
 import org.eclipse.swt.graphics.Color;
 import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.layout.GridLayout;
@@ -42,9 +45,12 @@ public final class AiPreferencePage extends PreferencePage implements IWorkbench
     private Button autoModeButton;
     private Button manualModeButton;
     private Label autoModelLabel;
+    private Text modelFilterText;
     private Combo manualModelCombo;
     private Button refreshButton;
     private Label catalogHint;
+    private String[] allModelIds = new String[0];
+    private String lastModelDraft = "";
     private Spinner maxTokensSpinner;
     private Spinner temperatureSpinner;
     private Spinner timeoutSpinner;
@@ -73,8 +79,12 @@ public final class AiPreferencePage extends PreferencePage implements IWorkbench
         root.setLayoutData(new GridData(SWT.FILL, SWT.FILL, true, true));
 
         createConnectionGroup(root);
+        createModelGroup(root);
         createCompletionGroup(root);
         loadPersistedValues(false);
+        // The catalog is already loaded once bootstrap verified the endpoint.
+        // Without this the dropdown stays empty until Test/Refresh is pressed.
+        populateModels(AiRuntime.get().catalog());
         updateModeControls();
         updateRuntimeStatus();
         initializing = false;
@@ -103,14 +113,29 @@ public final class AiPreferencePage extends PreferencePage implements IWorkbench
         connectionStatus = new Label(group, SWT.NONE);
         connectionStatus.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 3, 1));
         connectionDetails = new Label(group, SWT.WRAP);
-        connectionDetails.setLayoutData(new GridData(SWT.FILL, SWT.TOP, true, false, 4, 1));
+        GridData detailsData = new GridData(SWT.FILL, SWT.TOP, true, false, 4, 1);
+        // Reserve the room the report needs up front. Without a fixed height the
+        // group keeps its old bounds when the report grows, and the rows below
+        // are clipped instead of being pushed down.
+        detailsData.heightHint = convertHeightInCharsToPixels(4);
+        connectionDetails.setLayoutData(detailsData);
 
-        Label separator = new Label(group, SWT.SEPARATOR | SWT.HORIZONTAL);
-        separator.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 4, 1));
+        baseUrlText.addModifyListener(event -> onConnectionDraftChanged());
+        apiKeyText.addModifyListener(event -> onConnectionDraftChanged());
+    }
 
-        new Label(group, SWT.NONE).setText("Model selection");
+    private void createModelGroup(Composite parent) {
+        Group group = new Group(parent, SWT.NONE);
+        group.setText("Model");
+        group.setLayout(new GridLayout(4, false));
+        group.setLayoutData(new GridData(SWT.FILL, SWT.TOP, true, false));
+
+        new Label(group, SWT.NONE).setText("Selection");
         Composite modes = new Composite(group, SWT.NONE);
-        modes.setLayout(new GridLayout(2, false));
+        GridLayout modesLayout = new GridLayout(2, false);
+        modesLayout.marginWidth = 0;
+        modesLayout.marginHeight = 0;
+        modes.setLayout(modesLayout);
         modes.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 3, 1));
         autoModeButton = new Button(modes, SWT.RADIO);
         autoModeButton.setText("Auto");
@@ -123,19 +148,26 @@ public final class AiPreferencePage extends PreferencePage implements IWorkbench
         autoModelLabel = new Label(group, SWT.NONE);
         autoModelLabel.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 3, 1));
 
-        new Label(group, SWT.NONE).setText("Manual model");
-        manualModelCombo = new Combo(group, SWT.DROP_DOWN | SWT.BORDER);
-        manualModelCombo.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 2, 1));
+        new Label(group, SWT.NONE).setText("Filter");
+        modelFilterText = new Text(group, SWT.BORDER | SWT.SEARCH | SWT.ICON_CANCEL);
+        modelFilterText.setMessage("Type to narrow the model list");
+        modelFilterText.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 2, 1));
         refreshButton = new Button(group, SWT.PUSH);
         refreshButton.setText("Refresh models");
+        refreshButton.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, false, false));
         refreshButton.addListener(SWT.Selection, event -> runConnectionTest());
+        modelFilterText.addModifyListener(event -> applyModelFilter());
+
+        new Label(group, SWT.NONE).setText("Manual model");
+        manualModelCombo = new Combo(group, SWT.DROP_DOWN | SWT.BORDER);
+        manualModelCombo.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 3, 1));
+        manualModelCombo.setVisibleItemCount(15);
         manualModelCombo.addModifyListener(event -> onModelDraftChanged());
 
         catalogHint = new Label(group, SWT.WRAP);
-        catalogHint.setLayoutData(new GridData(SWT.FILL, SWT.TOP, true, false, 4, 1));
-
-        baseUrlText.addModifyListener(event -> onConnectionDraftChanged());
-        apiKeyText.addModifyListener(event -> onConnectionDraftChanged());
+        GridData hintData = new GridData(SWT.FILL, SWT.TOP, true, false, 4, 1);
+        hintData.heightHint = convertHeightInCharsToPixels(2);
+        catalogHint.setLayoutData(hintData);
     }
 
     private void createCompletionGroup(Composite parent) {
@@ -179,6 +211,11 @@ public final class AiPreferencePage extends PreferencePage implements IWorkbench
 
     private void onModelDraftChanged() {
         if (initializing) return;
+        // Picking or typing in the combo must not reset a healthy runtime state
+        // unless the model identifier really changed.
+        String draft = manualModeButton.getSelection() ? manualModelCombo.getText().trim() : "";
+        if (manualModeButton.getSelection() && draft.equals(lastModelDraft)) return;
+        lastModelDraft = draft;
         if (autoModeButton.getSelection()) {
             AiRuntime.get().resolveAutoFromCatalog();
             var resolved = AiRuntime.get().snapshot().resolvedModelId();
@@ -269,26 +306,56 @@ public final class AiPreferencePage extends PreferencePage implements IWorkbench
         catalogHint.setText(report.catalogSupported()
             ? "Model list was loaded from the endpoint."
             : "The model field is editable because this endpoint cannot list models.");
-        connectionDetails.getParent().layout(true, true);
+        reflow();
     }
 
-    private void populateModels(List<ModelInfo> models) {
-        String manual = manualModelCombo.getText();
-        String[] items = models.stream().map(ModelInfo::id).sorted().toArray(String[]::new);
+    /**
+     * Re-lays out the whole page and, when the preference dialog hosts it inside
+     * a scrolled area, updates the scroll extent. Laying out only the group that
+     * changed leaves its parent at the old size and clips the rows below it.
+     */
+    private void reflow() {
+        Control control = getControl();
+        if (control == null || control.isDisposed()) return;
+        for (Composite composite = (Composite) control; composite != null; composite = composite.getParent()) {
+            composite.layout(true, true);
+            if (composite instanceof ScrolledComposite scrolled && scrolled.getContent() != null) {
+                scrolled.setMinSize(scrolled.getContent().computeSize(SWT.DEFAULT, SWT.DEFAULT));
+                return;
+            }
+            if (composite == getShell()) return;
+        }
+    }
+
+    private void applyModelFilter() {
+        if (manualModelCombo == null || manualModelCombo.isDisposed()) return;
+        String filter = modelFilterText.getText().trim().toLowerCase(Locale.ROOT);
+        String selected = manualModelCombo.getText();
+        String[] items = filter.isEmpty()
+            ? allModelIds.clone()
+            : Arrays.stream(allModelIds)
+                .filter(id -> id.toLowerCase(Locale.ROOT).contains(filter))
+                .toArray(String[]::new);
         boolean wasInitializing = initializing;
         initializing = true;
         try {
             manualModelCombo.setItems(items);
-            manualModelCombo.setText(manual);
+            manualModelCombo.setText(selected);
         } finally {
             initializing = wasInitializing;
         }
+    }
+
+    private void populateModels(List<ModelInfo> models) {
+        allModelIds = models.stream().map(ModelInfo::id).sorted().toArray(String[]::new);
+        applyModelFilter();
     }
 
     private void updateModeControls() {
         if (manualModelCombo == null) return;
         boolean manual = manualModeButton.getSelection();
         manualModelCombo.setEnabled(manual && !testing);
+        modelFilterText.setEnabled(manual && !testing);
         autoModelLabel.setEnabled(!manual);
     }
 
@@ -389,6 +456,7 @@ public final class AiPreferencePage extends PreferencePage implements IWorkbench
         autoModeButton.setSelection(model.mode() == ModelSelectionMode.AUTO);
         manualModeButton.setSelection(model.mode() == ModelSelectionMode.MANUAL);
         manualModelCombo.setText(model.manualModelId());
+        lastModelDraft = model.mode() == ModelSelectionMode.MANUAL ? model.manualModelId().trim() : "";
         autoModelLabel.setText(model.lastResolvedAutoId().isBlank() ? "Not resolved" : model.lastResolvedAutoId());
         maxTokensSpinner.setSelection(completion.maxTokens());
         temperatureSpinner.setSelection((int) Math.round(completion.temperature() * 10));
