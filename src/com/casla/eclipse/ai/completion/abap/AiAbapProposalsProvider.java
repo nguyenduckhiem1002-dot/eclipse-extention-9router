@@ -23,7 +23,6 @@ import com.casla.eclipse.ai.client.ApiException;
 import com.casla.eclipse.ai.client.CompletionResponse;
 import com.casla.eclipse.ai.completion.CodeContext;
 import com.casla.eclipse.ai.completion.CompletionCache;
-import com.casla.eclipse.ai.completion.CompletionSanitizer;
 import com.casla.eclipse.ai.completion.GhostTextController;
 import com.casla.eclipse.ai.preferences.AiPreferences;
 import com.casla.eclipse.ai.runtime.AiRuntime;
@@ -127,7 +126,8 @@ public final class AiAbapProposalsProvider implements IClientProposalsProvider {
             if (!context.isCurrent(document)) {
                 return "";
             }
-            return new CompletionSanitizer().sanitize(response.content(), context);
+            // Already sanitized (and confirmed non-blank) by AiRuntime.complete().
+            return response.content();
         } catch (OperationCanceledException ignored) {
             return "";
         } catch (ApiException error) {

@@ -44,8 +44,8 @@ public final class AiCompletionProposalComputer implements IJavaCompletionPropos
             CompletionResponse response = AiRuntime.get().complete(context, monitor);
             if (!context.isCurrent(document)) return List.of();
 
-            String insertion = new CompletionSanitizer().sanitize(response.content(), context);
-            if (insertion.isBlank()) return List.of();
+            // Already sanitized (and confirmed non-blank) by AiRuntime.complete().
+            String insertion = response.content();
 
             errorMessage = null;
             String display = "AI suggestion · " + runtime.resolvedModelId();

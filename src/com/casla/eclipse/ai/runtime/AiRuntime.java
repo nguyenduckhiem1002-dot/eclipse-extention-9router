@@ -26,6 +26,7 @@ import com.casla.eclipse.ai.client.ModelCatalog;
 import com.casla.eclipse.ai.client.OpenAiCompatibleClient;
 import com.casla.eclipse.ai.completion.CodeContext;
 import com.casla.eclipse.ai.completion.CompletionPromptBuilder;
+import com.casla.eclipse.ai.completion.CompletionSanitizer;
 import com.casla.eclipse.ai.preferences.AiPreferences;
 
 public final class AiRuntime {
@@ -227,8 +228,9 @@ public final class AiRuntime {
                 activeConnection, model, prompt.system(), prompt.user(), settings, monitor, singleLine
             );
             ensureCurrent(requestGeneration);
+            CompletionResponse sanitized = sanitizeOrThrow(response, context);
             markKnownGood(model);
-            return response;
+            return sanitized;
         } catch (ApiException firstError) {
             if (activeModelPreference.mode() != ModelSelectionMode.AUTO
                 || !firstError.isModelResolutionError()) {
@@ -249,13 +251,32 @@ public final class AiRuntime {
                     activeConnection, fallback, prompt.system(), prompt.user(), settings, monitor, singleLine
                 );
                 ensureCurrent(requestGeneration);
+                CompletionResponse sanitized = sanitizeOrThrow(response, context);
                 markKnownGood(fallback);
-                return response;
+                return sanitized;
             } catch (ApiException secondError) {
                 updateRuntimeError(secondError);
                 throw secondError;
             }
         }
+    }
+
+    /**
+     * Sanitizes here, not in each caller, specifically so a response that
+     * comes back 200 OK but sanitizes to nothing -- prose instead of code,
+     * a stray fence -- never reaches markKnownGood. Marking a model "known
+     * good" on HTTP success alone let a model that reliably answers with
+     * garbage stay permanently pinned via the resolver's known-good bonus,
+     * undermining any attempt to steer Auto mode away from it.
+     */
+    private CompletionResponse sanitizeOrThrow(CompletionResponse response, CodeContext context) throws ApiException {
+        String insertion = new CompletionSanitizer().sanitize(response.content(), context);
+        if (insertion.isBlank()) {
+            throw new ApiException(200, "EMPTY_COMPLETION", "The model returned an empty completion.");
+        }
+        return new CompletionResponse(
+            insertion, response.responseModel(), response.requestId(), response.promptTokens(), response.completionTokens()
+        );
     }
 
     public void shutdown() {

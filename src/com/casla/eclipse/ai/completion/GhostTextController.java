@@ -274,7 +274,8 @@ public final class GhostTextController implements IPartListener2, IDocumentListe
                 // instead of finishing and queuing behind the next one.
                 CompletionResponse response =
                     AiRuntime.get().complete(context, new TicketMonitor(requestTicket), false);
-                String insertion = new CompletionSanitizer().sanitize(response.content(), context);
+                // Already sanitized (and confirmed non-blank) by AiRuntime.complete().
+                String insertion = response.content();
                 if (insertion.isBlank()) return;
 
                 CompletionCache.get().put(cacheKey, insertion);

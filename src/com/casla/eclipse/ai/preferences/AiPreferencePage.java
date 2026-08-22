@@ -49,6 +49,7 @@ public final class AiPreferencePage extends PreferencePage implements IWorkbench
     private Button autoModeButton;
     private Button manualModeButton;
     private Label autoModelLabel;
+    private Button resetModelMemoryButton;
     private Text modelFilterText;
     private Combo manualModelCombo;
     private Button refreshButton;
@@ -151,7 +152,15 @@ public final class AiPreferencePage extends PreferencePage implements IWorkbench
 
         new Label(group, SWT.NONE).setText("Auto model");
         autoModelLabel = new Label(group, SWT.NONE);
-        autoModelLabel.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 3, 1));
+        autoModelLabel.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 2, 1));
+        resetModelMemoryButton = new Button(group, SWT.PUSH);
+        resetModelMemoryButton.setText("Reset");
+        resetModelMemoryButton.setToolTipText(
+            "Forgets the \"last known good\" model, which otherwise keeps winning Auto selection even after a"
+                + " model change or a resolver update, since it outweighs every other scoring signal."
+        );
+        resetModelMemoryButton.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, false, false));
+        resetModelMemoryButton.addListener(SWT.Selection, event -> resetModelMemory());
 
         new Label(group, SWT.NONE).setText("Filter");
         modelFilterText = new Text(group, SWT.BORDER | SWT.SEARCH | SWT.ICON_CANCEL);
@@ -220,6 +229,33 @@ public final class AiPreferencePage extends PreferencePage implements IWorkbench
         autoModelLabel.setText("Not resolved");
         showStatus("● Not verified", "Configuration changed — test the connection again.", SWT.COLOR_DARK_YELLOW);
         validatePage();
+    }
+
+    /**
+     * The persisted "last known good" model gets a dominant bonus in
+     * ModelResolver specifically so a working setup survives small catalog
+     * or scoring changes -- but that same stickiness means a model that
+     * happens to keep answering with HTTP 200 (even if the content is
+     * garbage the sanitizer rejects) can stay pinned indefinitely, and a
+     * deliberate resolver-weighting change has no way to take effect until
+     * it's cleared. Re-resolving immediately after gives visible feedback
+     * instead of leaving the label stale until the next keystroke.
+     */
+    private void resetModelMemory() {
+        preferences.clearAutoModelCache();
+        boolean wasInitializing = initializing;
+        initializing = true;
+        try {
+            loadPersistedValues(false);
+        } finally {
+            initializing = wasInitializing;
+        }
+        updateModeControls();
+        if (autoModeButton.getSelection()) {
+            runConnectionTest();
+        } else {
+            showStatus("● Not verified", "Model memory cleared — test the connection again.", SWT.COLOR_DARK_YELLOW);
+        }
     }
 
     private void onModelDraftChanged() {
