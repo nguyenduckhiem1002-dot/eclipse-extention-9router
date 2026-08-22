@@ -15,6 +15,8 @@ Require-Bundle: org.eclipse.core.runtime,
  org.eclipse.ui,
  org.eclipse.ui.workbench.texteditor,
  org.eclipse.jdt.core,
- org.eclipse.jdt.ui
+ org.eclipse.jdt.ui,
+ com.sap.adt.tools.abapsource.ui;resolution:=optional,
+ com.sap.adt.util.ui;resolution:=optional
 Export-Package: com.casla.eclipse.ai.api
 Automatic-Module-Name: com.casla.eclipse.ai

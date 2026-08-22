@@ -207,6 +207,11 @@ public final class AiRuntime {
 
     public CompletionResponse complete(CodeContext context, IProgressMonitor monitor)
         throws ApiException, OperationCanceledException {
+        return complete(context, monitor, false);
+    }
+
+    public CompletionResponse complete(CodeContext context, IProgressMonitor monitor, boolean singleLine)
+        throws ApiException, OperationCanceledException {
         RuntimeSnapshot state = snapshot.get();
         if (!state.canComplete()) {
             throw new ApiException(0, "NOT_READY", "AI connection or model is not ready.");
@@ -219,7 +224,7 @@ public final class AiRuntime {
 
         try {
             CompletionResponse response = client.complete(
-                activeConnection, model, prompt.system(), prompt.user(), settings, monitor
+                activeConnection, model, prompt.system(), prompt.user(), settings, monitor, singleLine
             );
             ensureCurrent(requestGeneration);
             markKnownGood(model);
@@ -241,7 +246,7 @@ public final class AiRuntime {
             preferences.saveLastResolvedAutoModel(fallback);
             try {
                 CompletionResponse response = client.complete(
-                    activeConnection, fallback, prompt.system(), prompt.user(), settings, monitor
+                    activeConnection, fallback, prompt.system(), prompt.user(), settings, monitor, singleLine
                 );
                 ensureCurrent(requestGeneration);
                 markKnownGood(fallback);

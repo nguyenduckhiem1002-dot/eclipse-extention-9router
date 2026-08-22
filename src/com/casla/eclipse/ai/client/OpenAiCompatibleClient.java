@@ -98,6 +98,24 @@ public final class OpenAiCompatibleClient implements AutoCloseable {
         CompletionSettings settings,
         IProgressMonitor monitor
     ) throws ApiException, OperationCanceledException {
+        return complete(connection, model, systemPrompt, userPrompt, settings, monitor, false);
+    }
+
+    /**
+     * @param singleLine caps the reply at one line. This both matches the
+     *     inline ghost-text UX and is the main latency lever: without a stop
+     *     sequence the model happily emits a whole block and the caller waits
+     *     for all of it.
+     */
+    public CompletionResponse complete(
+        ConnectionConfig connection,
+        String model,
+        String systemPrompt,
+        String userPrompt,
+        CompletionSettings settings,
+        IProgressMonitor monitor,
+        boolean singleLine
+    ) throws ApiException, OperationCanceledException {
         ensureNotCanceled(monitor);
 
         Map<String, Object> body = new LinkedHashMap<>();
@@ -106,9 +124,12 @@ public final class OpenAiCompatibleClient implements AutoCloseable {
             Map.of("role", "system", "content", systemPrompt),
             Map.of("role", "user", "content", userPrompt)
         ));
-        body.put("max_tokens", settings.maxTokens());
+        body.put("max_tokens", singleLine ? Math.min(settings.maxTokens(), 64) : settings.maxTokens());
         body.put("temperature", settings.temperature());
         body.put("stream", true);
+        if (singleLine) {
+            body.put("stop", List.of("\n"));
+        }
 
         HttpRequest request = requestBuilder(
             connection.endpoint("/chat/completions"),
@@ -128,7 +149,7 @@ public final class OpenAiCompatibleClient implements AutoCloseable {
         String contentType = response.headers().firstValue("Content-Type").orElse("");
         try {
             if (contentType.toLowerCase().contains("text/event-stream")) {
-                return readSseCompletion(response.body(), monitor);
+                return readSseCompletion(response.body(), monitor, singleLine);
             }
             return readJsonCompletion(readLimited(response.body(), 4 * 1024 * 1024));
         } catch (IOException error) {
@@ -138,7 +159,8 @@ public final class OpenAiCompatibleClient implements AutoCloseable {
 
     private CompletionResponse readSseCompletion(
         InputStream stream,
-        IProgressMonitor monitor
+        IProgressMonitor monitor,
+        boolean singleLine
     ) throws IOException, ApiException {
         StringBuilder content = new StringBuilder();
         String model = "";
@@ -165,8 +187,8 @@ public final class OpenAiCompatibleClient implements AutoCloseable {
                 model = firstNonBlank(model, Json.string(event.get("model")));
 
                 List<Object> choices = Json.array(event.get("choices"));
-                if (!choices.isEmpty()) {
-                    Map<String, Object> choice = Json.object(choices.get(0));
+                Map<String, Object> choice = choices.isEmpty() ? Map.of() : Json.object(choices.get(0));
+                if (!choice.isEmpty()) {
                     Map<String, Object> delta = Json.object(choice.get("delta"));
                     content.append(extractText(delta.get("content")));
                 }
@@ -174,10 +196,11 @@ public final class OpenAiCompatibleClient implements AutoCloseable {
                 Map<String, Object> usage = Json.object(event.get("usage"));
                 promptTokens = number(usage.get("prompt_tokens"), promptTokens);
                 completionTokens = number(usage.get("completion_tokens"), completionTokens);
-                if (!choices.isEmpty()) {
-                    Map<String, Object> choice = Json.object(choices.get(0));
-                    if (!Json.string(choice.get("finish_reason")).isBlank()) break;
-                }
+
+                // Endpoints that ignore the stop sequence would otherwise keep
+                // the caller waiting for a whole block of code it will discard.
+                if (singleLine && content.indexOf("\n") >= 0) break;
+                if (!choice.isEmpty() && !Json.string(choice.get("finish_reason")).isBlank()) break;
             }
         }
 

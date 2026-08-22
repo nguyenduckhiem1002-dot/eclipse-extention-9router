@@ -5,13 +5,13 @@ public final class CompletionPromptBuilder {
 
     public Prompt build(CodeContext context) {
         String system = """
-            You are an inline Java code completion engine.
+            You are an inline %s code completion engine.
             Return only the code that should be inserted at <CURSOR>.
             Do not return markdown fences or explanations.
             Do not repeat code before or after the cursor.
             Preserve indentation, naming style, nullability, and error-handling conventions.
             Prefer the smallest useful completion.
-            """.strip();
+            """.formatted(context.language()).strip();
 
         String user = """
             Project: %s
