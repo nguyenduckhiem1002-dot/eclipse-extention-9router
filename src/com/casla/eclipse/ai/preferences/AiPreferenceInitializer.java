@@ -19,12 +19,12 @@ public final class AiPreferenceInitializer extends AbstractPreferenceInitializer
         store.setDefault(PreferenceConstants.MANUAL_MODEL_ID, "ag/gemini-3.5-flash-extra-low");
         store.setDefault(PreferenceConstants.LAST_RESOLVED_AUTO_ID, "");
         store.setDefault(PreferenceConstants.LAST_KNOWN_GOOD_MODEL, "");
-        store.setDefault(PreferenceConstants.MAX_TOKENS, 128);
+        store.setDefault(PreferenceConstants.MAX_TOKENS, 256);
         store.setDefault(PreferenceConstants.TEMPERATURE, "0.1");
         store.setDefault(PreferenceConstants.TIMEOUT_SECONDS, 30);
         store.setDefault(PreferenceConstants.CONTEXT_BEFORE, 6000);
         store.setDefault(PreferenceConstants.CONTEXT_AFTER, 2000);
-        store.setDefault(PreferenceConstants.AUTOMATIC_SUGGESTION, false);
+        store.setDefault(PreferenceConstants.AUTOMATIC_SUGGESTION, true);
         store.setDefault(PreferenceConstants.DEBOUNCE_MILLIS, 500);
         store.setDefault(PreferenceConstants.REASONING_EFFORT, "default");
     }

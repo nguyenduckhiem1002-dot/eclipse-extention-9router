@@ -1,11 +1,53 @@
 param(
-    [string]$EclipseRoot = "C:\Users\CNTT-KHIEM\Downloads\eclipse-java-2026-06-R-win32-x86_64\eclipse",
-    [string]$JdkRoot = "C:\Program Files\Android\Android Studio\jbr",
+    [string]$EclipseRoot = "",
+    [string]$JdkRoot = "",
     [string]$Version = "0.1.0"
 )
 
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+
+# Auto-detect Eclipse root if not provided or path does not exist
+$EclipseCandidates = @(
+    $EclipseRoot,
+    "C:\Users\admin\Downloads\eclipse-java-2026-06-R-win32-x86_64\eclipse",
+    "C:\Users\CNTT-KHIEM\Downloads\eclipse-java-2026-06-R-win32-x86_64\eclipse",
+    "C:\Program Files\Eclipse"
+)
+foreach ($candidate in $EclipseCandidates) {
+    if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-Path (Join-Path $candidate "plugins"))) {
+        $EclipseRoot = $candidate
+        break
+    }
+}
+
+# Auto-detect JDK 21 root if not provided or path does not exist
+$JustjJre = $null
+if (Test-Path $EclipseRoot) {
+    $JustjCandidate = Get-ChildItem (Join-Path $EclipseRoot "plugins") -Filter "org.eclipse.justj.openjdk.hotspot.jre.full.win32.x86_64_*" -ErrorAction SilentlyContinue |
+        Select-Object -First 1 -ExpandProperty FullName
+    if ($JustjCandidate) {
+        $JustjJre = Join-Path $JustjCandidate "jre"
+    }
+}
+
+$JdkCandidates = @(
+    $JdkRoot,
+    $JustjJre,
+    "C:\Program Files\Android\Android Studio\jbr",
+    "C:\Program Files\Eclipse Adoptium\jdk-21*",
+    "C:\Program Files\Java\jdk-21*"
+)
+foreach ($candidate in $JdkCandidates) {
+    if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+        $resolved = (Resolve-Path $candidate -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Path)
+        if ($resolved -and (Test-Path (Join-Path $resolved "bin\javac.exe"))) {
+            $JdkRoot = $resolved
+            break
+        }
+    }
+}
+
 $BuildRoot = Join-Path $ProjectRoot "build"
 $Classes = Join-Path $BuildRoot "classes"
 $TestClasses = Join-Path $BuildRoot "test-classes"
@@ -22,7 +64,7 @@ $EquinoxLauncher = Get-ChildItem (Join-Path $EclipseRoot "plugins") -Filter "org
     Select-Object -First 1 -ExpandProperty FullName
 
 foreach ($required in @($Javac, $Java, $Jar, $EquinoxLauncher)) {
-    if (-not (Test-Path $required)) { throw "Required build tool not found: $required" }
+    if (-not (Test-Path $required)) { throw "Required build tool not found: $required (EclipseRoot: $EclipseRoot, JdkRoot: $JdkRoot)" }
 }
 
 if (Test-Path $BuildRoot) { Remove-Item -LiteralPath $BuildRoot -Recurse -Force }

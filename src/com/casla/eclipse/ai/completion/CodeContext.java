@@ -8,6 +8,8 @@ import java.util.HexFormat;
 import org.eclipse.jface.text.IDocument;
 import org.eclipse.jface.text.IDocumentExtension4;
 
+import java.util.List;
+
 public record CodeContext(
     String projectName,
     String filePath,
@@ -20,10 +22,44 @@ public record CodeContext(
     String afterCursor,
     int cursorOffset,
     long modificationStamp,
-    String fingerprint
+    String fingerprint,
+    CursorContextType cursorContext,
+    List<RelatedFileCollector.RelatedFile> relatedFiles
 ) {
     public CodeContext {
         structureHint = structureHint == null ? "" : structureHint;
+        cursorContext = cursorContext == null ? CursorContextType.CODE : cursorContext;
+        relatedFiles = relatedFiles == null ? List.of() : List.copyOf(relatedFiles);
+    }
+
+    public CodeContext(
+        String projectName,
+        String filePath,
+        String language,
+        String packageName,
+        String imports,
+        String structureHint,
+        String beforeCursor,
+        String afterCursor,
+        int cursorOffset,
+        long modificationStamp,
+        String fingerprint
+    ) {
+        this(
+            projectName,
+            filePath,
+            language,
+            packageName,
+            imports,
+            structureHint,
+            beforeCursor,
+            afterCursor,
+            cursorOffset,
+            modificationStamp,
+            fingerprint,
+            CursorContextType.CODE,
+            List.of()
+        );
     }
 
     public boolean isCurrent(IDocument document) {

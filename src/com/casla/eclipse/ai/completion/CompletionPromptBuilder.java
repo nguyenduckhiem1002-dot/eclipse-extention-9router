@@ -17,13 +17,20 @@ public final class CompletionPromptBuilder {
     }
 
     private String buildSystem(CodeContext context) {
+        String roleDesc = switch (context.cursorContext()) {
+            case JAVADOC -> "You are an inline " + context.language() + " documentation completion engine.\nThe cursor is inside a Javadoc block. Complete the Javadoc description, tags, or sentences accurately.";
+            case LINE_COMMENT, BLOCK_COMMENT -> "You are an inline " + context.language() + " comment completion engine.\nThe cursor is inside a comment. Complete the natural language explanation or comment text.";
+            case STRING_LITERAL -> "You are an inline " + context.language() + " text completion engine.\nThe cursor is inside a string literal. Return only the string text to be inserted.";
+            case CODE -> "You are an inline " + context.language() + " code completion engine.";
+        };
+
         String base = """
-            You are an inline %s code completion engine.
-            Return only the code that should be inserted at <CURSOR>.
-            Do not return markdown fences or explanations.
+            %s
+            Return only the code or text that should be inserted directly at <CURSOR>.
+            Do not return markdown fences (```) or explanations.
             Do not repeat code before or after the cursor.
-            Preserve indentation, naming style, nullability, and error-handling conventions.
-            Prefer the smallest useful completion.""".formatted(context.language());
+            Preserve indentation, naming style, nullability, and surrounding conventions.
+            Use relevant context from related files when referencing types and methods.""".formatted(roleDesc);
         String rules = "ABAP".equals(context.language()) ? ABAP_RULES : "";
         return (base + rules).strip();
     }
@@ -43,7 +50,14 @@ public final class CompletionPromptBuilder {
         if (!context.imports().isBlank()) {
             user.append("\nImports:\n").append(context.imports()).append('\n');
         }
-        user.append("\nCode before cursor:\n").append(context.beforeCursor());
+        if (context.relatedFiles() != null && !context.relatedFiles().isEmpty()) {
+            user.append("\nRelated context:\n");
+            for (var related : context.relatedFiles()) {
+                user.append("--- ").append(related.path()).append(" ---\n");
+                user.append(related.summary()).append("\n\n");
+            }
+        }
+        user.append("Code before cursor:\n").append(context.beforeCursor());
         user.append("\n\n<CURSOR>\n\n");
         user.append("Code after cursor:\n").append(context.afterCursor());
         return user.toString();

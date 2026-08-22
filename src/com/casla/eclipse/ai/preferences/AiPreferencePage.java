@@ -206,11 +206,11 @@ public final class AiPreferencePage extends PreferencePage implements IWorkbench
         reasoningNote.setLayoutData(new GridData(SWT.FILL, SWT.TOP, true, false, 4, 1));
 
         automaticSuggestionButton = new Button(group, SWT.CHECK);
-        automaticSuggestionButton.setText("Enable automatic suggestion (experimental)");
+        automaticSuggestionButton.setText("Enable automatic ghost text (Copilot style)");
         automaticSuggestionButton.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 4, 1));
 
         Label note = new Label(group, SWT.WRAP);
-        note.setText("Automatic mode shows an inline ghost-text suggestion after a short pause. Press Tab to accept it, Esc to dismiss it.");
+        note.setText("Inline ghost text appears as you type. Tab: accept all, Ctrl+Right / Alt+]: accept word, Ctrl+Down: accept line, Esc: dismiss.");
         note.setLayoutData(new GridData(SWT.FILL, SWT.TOP, true, false, 4, 1));
     }
 
