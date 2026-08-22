@@ -34,6 +34,9 @@ public final class CoreTests {
         testConnectionNormalization();
         testRemoteHttpRejected();
         testCompletionFenceRemoval();
+        testCompletionFenceRemovalNotAtStart();
+        testCompletionRejectsProseExplanation();
+        testCompletionKeepsRealCodeWithBacktickLiteral();
         testCompletionDeduplication();
         testAbapStructureHintInDefinitionSection();
         testAbapStructureHintInsideMethodImplementation();
@@ -126,6 +129,37 @@ public final class CoreTests {
     private static void testCompletionFenceRemoval() {
         String result = new CompletionSanitizer().sanitize("```java\nreturn value;\n```", context("", ""));
         check("return value;".equals(result), "Markdown fence removal");
+    }
+
+    private static void testCompletionFenceRemovalNotAtStart() {
+        // A weak/fast model sometimes prefaces the fence with a sentence
+        // instead of returning bare code as instructed.
+        String result = new CompletionSanitizer().sanitize(
+            "Sure, here's the code:\n```abap\nresult = 1.\n```",
+            context("", "")
+        );
+        check("result = 1.".equals(result), "Fence stripped even when preceded by prose: was '" + result + "'");
+    }
+
+    private static void testCompletionRejectsProseExplanation() {
+        // Exact reported failure: instead of code, the model wrote an
+        // explanation naming the method in backticks, which got inserted
+        // straight into the ABAP source as "result for `get_min`, it starts".
+        String result = new CompletionSanitizer().sanitize(
+            "for `get_min`, it starts by checking if the table is empty.",
+            context("    result ", "")
+        );
+        check(result.isEmpty(), "Prose explanation is rejected instead of inserted: was '" + result + "'");
+    }
+
+    private static void testCompletionKeepsRealCodeWithBacktickLiteral() {
+        // ABAP does allow backtick string literals; a legitimate one-off
+        // backtick in real code must not be caught by the prose guard.
+        String result = new CompletionSanitizer().sanitize(
+            "message = `Done`.",
+            context("", "")
+        );
+        check("message = `Done`.".equals(result), "Legitimate backtick string literal is kept: was '" + result + "'");
     }
 
     private static void testCompletionDeduplication() {

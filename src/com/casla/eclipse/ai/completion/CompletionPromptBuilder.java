@@ -30,7 +30,8 @@ public final class CompletionPromptBuilder {
             Do not return markdown fences (```) or explanations.
             Do not repeat code before or after the cursor.
             Preserve indentation, naming style, nullability, and surrounding conventions.
-            Use relevant context from related files when referencing types and methods.""".formatted(roleDesc);
+            Use relevant context from related files when referencing types and methods.
+            Never write a natural-language sentence describing the code (for example "for `foo`, it starts by checking..."). If you cannot produce valid code, return nothing.""".formatted(roleDesc);
         String rules = "ABAP".equals(context.language()) ? ABAP_RULES : "";
         return (base + rules).strip();
     }

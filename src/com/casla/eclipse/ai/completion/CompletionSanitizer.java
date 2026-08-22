@@ -1,24 +1,77 @@
 package com.casla.eclipse.ai.completion;
 
+import java.util.Locale;
+import java.util.Set;
+import java.util.regex.Pattern;
+
 public final class CompletionSanitizer {
     private static final int MAX_INSERTION_CHARACTERS = 32_000;
 
+    /**
+     * A fast/low-effort model asked for "code only, no explanations" doesn't
+     * always comply -- it sometimes writes prose like "for `get_min`, it
+     * starts by checking..." instead of code, which then gets inserted
+     * straight into the source file. This is the short list of common
+     * English connective/filler words a run of which marks text as prose
+     * rather than ABAP or Java; deliberately excludes words that double as
+     * real keywords in either language (e.g. "if", "is", "in", "do", "at").
+     */
+    private static final Set<String> PROSE_WORDS = Set.of(
+        "it", "this", "that", "these", "those", "starts", "begins", "here",
+        "note", "we", "you", "your", "would", "should", "could", "will",
+        "and", "but", "so", "means", "simply", "basically", "essentially"
+    );
+    private static final int PROSE_RUN_THRESHOLD = 2;
+    private static final Pattern WORD = Pattern.compile("[a-zA-Z']+");
+
+    /** "`identifier`, " -- a code token mentioned inline inside a sentence -- is a distinctive prose tell no real ABAP/Java statement produces. */
+    private static final Pattern BACKTICK_MENTION = Pattern.compile("`[\\w]+`\\s*,");
+
     public String sanitize(String raw, CodeContext context) {
         String value = raw == null ? "" : raw.replace("\r\n", "\n").replace('\r', '\n').trim();
-        if (value.startsWith("```")) {
-            int firstNewLine = value.indexOf('\n');
-            if (firstNewLine >= 0) value = value.substring(firstNewLine + 1);
-            int closingFence = value.lastIndexOf("```");
-            if (closingFence >= 0) value = value.substring(0, closingFence);
-        }
-
+        value = stripFence(value);
         value = value.strip();
         value = removeRepeatedPrefix(value, context.beforeCursor());
         value = removeRepeatedSuffix(value, context.afterCursor());
         if (value.length() > MAX_INSERTION_CHARACTERS) {
             value = value.substring(0, MAX_INSERTION_CHARACTERS);
         }
-        return value;
+        return looksLikeProse(value) ? "" : value;
+    }
+
+    /** Strips a ```-fenced block wherever it appears, not just when the response starts with one. */
+    private static String stripFence(String value) {
+        int openFence = value.indexOf("```");
+        if (openFence < 0) return value;
+        int firstNewLine = value.indexOf('\n', openFence);
+        int contentStart = firstNewLine >= 0 ? firstNewLine + 1 : value.length();
+        int closingFence = value.indexOf("```", contentStart);
+        return closingFence >= 0 ? value.substring(contentStart, closingFence) : value.substring(contentStart);
+    }
+
+    /**
+     * A cheap, deliberately conservative "is this actually a sentence"
+     * check: three or more of the connective words above in a row is enough
+     * English prose that real code -- ABAP or Java identifiers are
+     * underscore/camelCase, not space-separated filler words -- essentially
+     * never produces it by coincidence.
+     */
+    private static boolean looksLikeProse(String value) {
+        if (value.isBlank()) return false;
+        if (BACKTICK_MENTION.matcher(value).find()) return true;
+
+        var matcher = WORD.matcher(value);
+        int run = 0;
+        while (matcher.find()) {
+            String word = matcher.group().toLowerCase(Locale.ROOT);
+            if (PROSE_WORDS.contains(word)) {
+                run++;
+                if (run >= PROSE_RUN_THRESHOLD) return true;
+            } else {
+                run = 0;
+            }
+        }
+        return false;
     }
 
     /**
