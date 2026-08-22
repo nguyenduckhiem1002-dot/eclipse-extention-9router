@@ -36,6 +36,7 @@ public final class CoreTests {
         testCompletionFenceRemoval();
         testCompletionFenceRemovalNotAtStart();
         testCompletionRejectsProseExplanation();
+        testCompletionRejectsModelSelfCorrection();
         testCompletionKeepsRealCodeWithBacktickLiteral();
         testCompletionDeduplication();
         testAbapStructureHintInDefinitionSection();
@@ -150,6 +151,18 @@ public final class CoreTests {
             context("    result ", "")
         );
         check(result.isEmpty(), "Prose explanation is rejected instead of inserted: was '" + result + "'");
+    }
+
+    private static void testCompletionRejectsModelSelfCorrection() {
+        // Second reported failure: the model started an answer, then
+        // second-guessed its own instructions mid-stream instead of just
+        // returning code -- "Wait, the prompt says..." leaked straight into
+        // the suggestion.
+        String result = new CompletionSanitizer().sanitize(
+            "result = REDUCE i(\nWait, the prompt says the target expects MIN not MAX, let me reconsider.",
+            context("", "")
+        );
+        check(result.isEmpty(), "Model self-correction text is rejected: was '" + result + "'");
     }
 
     private static void testCompletionKeepsRealCodeWithBacktickLiteral() {

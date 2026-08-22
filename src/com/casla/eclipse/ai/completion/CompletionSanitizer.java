@@ -9,23 +9,34 @@ public final class CompletionSanitizer {
 
     /**
      * A fast/low-effort model asked for "code only, no explanations" doesn't
-     * always comply -- it sometimes writes prose like "for `get_min`, it
-     * starts by checking..." instead of code, which then gets inserted
-     * straight into the source file. This is the short list of common
-     * English connective/filler words a run of which marks text as prose
-     * rather than ABAP or Java; deliberately excludes words that double as
-     * real keywords in either language (e.g. "if", "is", "in", "do", "at").
+     * always comply. Observed live, in two different shapes: prose
+     * describing the code ("for `get_min`, it starts by checking...") and
+     * the model second-guessing its own instructions mid-answer ("Wait, the
+     * prompt says..."). Enumerating every sentence a model might leak is a
+     * losing game, so this leans on structural tells instead of a single
+     * word list: a run of ordinary English connective words, a discourse
+     * marker opening a clause ("Wait,", "Actually,", ...), or a code token
+     * mentioned inline in a sentence ("`name`,"). Deliberately excludes
+     * words that double as real keywords or common completions in either
+     * language (e.g. "if", "is", "in", "this." is extremely common Java).
      */
     private static final Set<String> PROSE_WORDS = Set.of(
         "it", "this", "that", "these", "those", "starts", "begins", "here",
         "note", "we", "you", "your", "would", "should", "could", "will",
-        "and", "but", "so", "means", "simply", "basically", "essentially"
+        "and", "but", "so", "means", "simply", "basically", "essentially",
+        "wait", "says", "prompt", "actually", "however", "let", "think",
+        "looking", "sure", "okay", "instead", "text", "instructions"
     );
     private static final int PROSE_RUN_THRESHOLD = 2;
     private static final Pattern WORD = Pattern.compile("[a-zA-Z']+");
 
     /** "`identifier`, " -- a code token mentioned inline inside a sentence -- is a distinctive prose tell no real ABAP/Java statement produces. */
     private static final Pattern BACKTICK_MENTION = Pattern.compile("`[\\w]+`\\s*,");
+
+    /** A capitalized discourse marker opening a clause: essentially never real code, but exactly how a model announces it's second-guessing itself. */
+    private static final Pattern DISCOURSE_OPENER = Pattern.compile(
+        "\\b(Wait|Actually|Hmm|Note|However|Alternatively|Instead|Looking|Let's|Sure|Okay)\\b[,:]"
+    );
 
     public String sanitize(String raw, CodeContext context) {
         String value = raw == null ? "" : raw.replace("\r\n", "\n").replace('\r', '\n').trim();
@@ -59,6 +70,7 @@ public final class CompletionSanitizer {
     private static boolean looksLikeProse(String value) {
         if (value.isBlank()) return false;
         if (BACKTICK_MENTION.matcher(value).find()) return true;
+        if (DISCOURSE_OPENER.matcher(value).find()) return true;
 
         var matcher = WORD.matcher(value);
         int run = 0;

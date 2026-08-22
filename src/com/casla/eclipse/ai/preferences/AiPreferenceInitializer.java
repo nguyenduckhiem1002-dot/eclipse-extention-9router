@@ -16,7 +16,11 @@ public final class AiPreferenceInitializer extends AbstractPreferenceInitializer
         // latency-sensitive, unlike a chat turn. Auto mode's resolver re-ranks the
         // live catalog with the same bias (see ModelResolver), so this id is only
         // the Manual-mode fallback and the seed before any catalog is loaded.
-        store.setDefault(PreferenceConstants.MANUAL_MODEL_ID, "ag/gemini-3.5-flash-extra-low");
+        // Plain "-low" rather than "extra-low": the extra-low tier was tried
+        // first and didn't reliably follow "code only, no explanations" --
+        // see CompletionSanitizer's prose-rejection guard, added after it
+        // leaked plain-English explanations into completions.
+        store.setDefault(PreferenceConstants.MANUAL_MODEL_ID, "ag/gemini-3.5-flash-low");
         store.setDefault(PreferenceConstants.LAST_RESOLVED_AUTO_ID, "");
         store.setDefault(PreferenceConstants.LAST_KNOWN_GOOD_MODEL, "");
         store.setDefault(PreferenceConstants.MAX_TOKENS, 256);

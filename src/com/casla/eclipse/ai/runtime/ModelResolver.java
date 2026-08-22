@@ -46,8 +46,13 @@ public final class ModelResolver {
         int score = 0;
         if (model.id().equals(lastKnownGood)) score += 10_000;
 
-        if (id.contains("extra-low") || id.contains("nano")) score += 750;
-        else if (id.contains("-low")) score += 600;
+        // Plain "-low" outranks "extra-low"/"nano": the extra-low tier was
+        // tried as the default and, in practice, didn't reliably follow the
+        // "code only, no explanations" instruction -- a model answering
+        // fast with prose that has to be rejected is not actually faster in
+        // the way that matters here.
+        if (id.contains("-low") && !id.contains("extra-low")) score += 750;
+        else if (id.contains("extra-low") || id.contains("nano")) score += 600;
         else if (id.contains("-medium")) score -= 100;
         else if (id.contains("-high")) score -= 500;
 
