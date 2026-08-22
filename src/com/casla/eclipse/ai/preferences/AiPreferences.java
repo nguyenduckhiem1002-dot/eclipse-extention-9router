@@ -35,7 +35,8 @@ public final class AiPreferences {
             store().getInt(PreferenceConstants.CONTEXT_BEFORE),
             store().getInt(PreferenceConstants.CONTEXT_AFTER),
             store().getBoolean(PreferenceConstants.AUTOMATIC_SUGGESTION),
-            store().getInt(PreferenceConstants.DEBOUNCE_MILLIS)
+            store().getInt(PreferenceConstants.DEBOUNCE_MILLIS),
+            store().getString(PreferenceConstants.REASONING_EFFORT)
         );
     }
 
@@ -59,6 +60,7 @@ public final class AiPreferences {
         store().setValue(PreferenceConstants.CONTEXT_AFTER, settings.contextAfter());
         store().setValue(PreferenceConstants.AUTOMATIC_SUGGESTION, settings.automaticSuggestion());
         store().setValue(PreferenceConstants.DEBOUNCE_MILLIS, settings.debounceMillis());
+        store().setValue(PreferenceConstants.REASONING_EFFORT, settings.reasoningEffort());
     }
 
     public void saveLastResolvedAutoModel(String modelId) {

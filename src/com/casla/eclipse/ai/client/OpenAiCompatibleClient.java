@@ -116,6 +116,29 @@ public final class OpenAiCompatibleClient implements AutoCloseable {
         IProgressMonitor monitor,
         boolean singleLine
     ) throws ApiException, OperationCanceledException {
+        boolean wantsReasoningEffort = !"default".equals(settings.reasoningEffort());
+        try {
+            return sendCompletion(connection, model, systemPrompt, userPrompt, settings, monitor, singleLine, wantsReasoningEffort);
+        } catch (ApiException firstError) {
+            // Not every OpenAI-compatible gateway accepts reasoning_effort; a
+            // rejected/unknown param usually surfaces as a plain 400. Retrying
+            // once without it keeps completions working on those gateways
+            // instead of hard-failing every request.
+            if (!wantsReasoningEffort || firstError.statusCode() != 400) throw firstError;
+            return sendCompletion(connection, model, systemPrompt, userPrompt, settings, monitor, singleLine, false);
+        }
+    }
+
+    private CompletionResponse sendCompletion(
+        ConnectionConfig connection,
+        String model,
+        String systemPrompt,
+        String userPrompt,
+        CompletionSettings settings,
+        IProgressMonitor monitor,
+        boolean singleLine,
+        boolean includeReasoningEffort
+    ) throws ApiException, OperationCanceledException {
         ensureNotCanceled(monitor);
 
         Map<String, Object> body = new LinkedHashMap<>();
@@ -129,6 +152,9 @@ public final class OpenAiCompatibleClient implements AutoCloseable {
         body.put("stream", true);
         if (singleLine) {
             body.put("stop", List.of("\n"));
+        }
+        if (includeReasoningEffort) {
+            body.put("reasoning_effort", settings.reasoningEffort());
         }
 
         HttpRequest request = requestBuilder(

@@ -26,7 +26,7 @@ public final class LiveEndpointTest {
                 model,
                 "Return only the requested text.",
                 "Reply exactly API_OK",
-                new CompletionSettings(16, 0.0, 60, 1000, 100, false, 500),
+                new CompletionSettings(16, 0.0, 60, 1000, 100, false, 500, "default"),
                 monitor
             );
             if (!"API_OK".equals(response.content().trim())) {

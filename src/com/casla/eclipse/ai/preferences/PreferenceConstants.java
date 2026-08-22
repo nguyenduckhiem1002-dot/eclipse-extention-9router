@@ -13,6 +13,7 @@ public final class PreferenceConstants {
     public static final String CONTEXT_AFTER = "completion.contextAfter";
     public static final String AUTOMATIC_SUGGESTION = "completion.automaticSuggestion";
     public static final String DEBOUNCE_MILLIS = "completion.debounceMillis";
+    public static final String REASONING_EFFORT = "completion.reasoningEffort";
 
     private PreferenceConstants() {}
 }

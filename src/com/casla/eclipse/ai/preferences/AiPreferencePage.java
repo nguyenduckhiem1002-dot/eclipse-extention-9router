@@ -35,6 +35,10 @@ import com.casla.eclipse.ai.runtime.AiRuntime;
 import com.casla.eclipse.ai.runtime.ConnectionTestReport;
 
 public final class AiPreferencePage extends PreferencePage implements IWorkbenchPreferencePage {
+    /** Ordered for display; must stay in sync with CompletionSettings.REASONING_EFFORT_LEVELS. */
+    private static final String[] REASONING_EFFORT_ITEMS =
+        {"default", "none", "minimal", "low", "medium", "high"};
+
     private final AiPreferences preferences = new AiPreferences();
 
     private Text baseUrlText;
@@ -58,6 +62,7 @@ public final class AiPreferencePage extends PreferencePage implements IWorkbench
     private Spinner contextAfterSpinner;
     private Button automaticSuggestionButton;
     private Spinner debounceSpinner;
+    private Combo reasoningEffortCombo;
     private boolean initializing;
     private boolean testing;
 
@@ -191,6 +196,14 @@ public final class AiPreferencePage extends PreferencePage implements IWorkbench
         contextBeforeSpinner = spinner(group, 500, 100_000, 6000, 500);
         new Label(group, SWT.NONE).setText("Context after");
         contextAfterSpinner = spinner(group, 0, 50_000, 2000, 500);
+
+        new Label(group, SWT.NONE).setText("Reasoning effort");
+        reasoningEffortCombo = new Combo(group, SWT.DROP_DOWN | SWT.READ_ONLY);
+        reasoningEffortCombo.setItems(REASONING_EFFORT_ITEMS);
+        reasoningEffortCombo.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 3, 1));
+        Label reasoningNote = new Label(group, SWT.WRAP);
+        reasoningNote.setText("\"default\" lets the endpoint choose. Lower levels cut latency on models with reasoning that can be turned down.");
+        reasoningNote.setLayoutData(new GridData(SWT.FILL, SWT.TOP, true, false, 4, 1));
 
         automaticSuggestionButton = new Button(group, SWT.CHECK);
         automaticSuggestionButton.setText("Enable automatic suggestion (experimental)");
@@ -447,7 +460,8 @@ public final class AiPreferencePage extends PreferencePage implements IWorkbench
                 store.getDefaultInt(PreferenceConstants.CONTEXT_BEFORE),
                 store.getDefaultInt(PreferenceConstants.CONTEXT_AFTER),
                 store.getDefaultBoolean(PreferenceConstants.AUTOMATIC_SUGGESTION),
-                store.getDefaultInt(PreferenceConstants.DEBOUNCE_MILLIS)
+                store.getDefaultInt(PreferenceConstants.DEBOUNCE_MILLIS),
+                store.getDefaultString(PreferenceConstants.REASONING_EFFORT)
             )
             : preferences.completionSettings();
 
@@ -465,6 +479,7 @@ public final class AiPreferencePage extends PreferencePage implements IWorkbench
         contextAfterSpinner.setSelection(completion.contextAfter());
         automaticSuggestionButton.setSelection(completion.automaticSuggestion());
         debounceSpinner.setSelection(completion.debounceMillis());
+        reasoningEffortCombo.setText(completion.reasoningEffort());
     }
 
     private ConnectionConfig draftConnection() {
@@ -493,7 +508,8 @@ public final class AiPreferencePage extends PreferencePage implements IWorkbench
             contextBeforeSpinner.getSelection(),
             contextAfterSpinner.getSelection(),
             automaticSuggestionButton.getSelection(),
-            debounceSpinner.getSelection()
+            debounceSpinner.getSelection(),
+            reasoningEffortCombo.getText()
         );
     }
 
