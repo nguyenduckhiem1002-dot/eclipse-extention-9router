@@ -22,7 +22,9 @@ import com.casla.eclipse.ai.api.RuntimeSnapshot;
 import com.casla.eclipse.ai.client.ApiException;
 import com.casla.eclipse.ai.client.CompletionResponse;
 import com.casla.eclipse.ai.completion.CodeContext;
+import com.casla.eclipse.ai.completion.CompletionCache;
 import com.casla.eclipse.ai.completion.CompletionSanitizer;
+import com.casla.eclipse.ai.completion.GhostTextController;
 import com.casla.eclipse.ai.preferences.AiPreferences;
 import com.casla.eclipse.ai.runtime.AiRuntime;
 
@@ -36,17 +38,18 @@ import com.casla.eclipse.ai.runtime.AiRuntime;
  * synchronous HTTP call here freezes the editor for the request's duration.
  * To avoid that, the request runs on a background executor and this method
  * blocks for at most MAX_BLOCK_MILLIS -- short enough not to read as a
- * freeze, long enough to catch a fast response. A slower request keeps
- * running in the background; once it lands, the result is kept in RESULTS
- * under the exact document+offset fingerprint (not just deduped in-flight),
- * so the next invocation at the same position -- typically moments away,
- * since ADT re-queries providers as the popup stays open or is re-opened --
- * returns it instantly instead of blocking again.
+ * freeze, long enough to catch a fast response.
+ *
+ * The result cache is CompletionCache, shared with GhostTextController's
+ * automatic suggestions (same document+offset+shape key): whichever path
+ * answers a position first serves the other. When a request outlives the
+ * block window, it keeps running in the background; on arrival its answer is
+ * still cached and additionally handed to GhostTextController.offerCompletion
+ * so it shows up as ghost text a moment later instead of being discarded --
+ * the popup already gave up, but the editor doesn't have to lose the answer.
  */
 public final class AiAbapProposalsProvider implements IClientProposalsProvider {
-    private static final long MAX_BLOCK_MILLIS = 1200;
-    private static final long RESULT_TTL_MILLIS = 60_000;
-    private static final int MAX_CACHED_RESULTS = 32;
+    private static final long MAX_BLOCK_MILLIS = 300;
 
     // Daemon threads: nothing outside this class references AiPlugin, so
     // there is no shutdown hook to release this executor explicitly without
@@ -58,16 +61,8 @@ public final class AiAbapProposalsProvider implements IClientProposalsProvider {
         return thread;
     });
 
-    private static final ConcurrentHashMap<String, CompletableFuture<List<ICompletionProposal>>> PENDING =
+    private static final ConcurrentHashMap<String, CompletableFuture<String>> PENDING =
         new ConcurrentHashMap<>();
-
-    private record CachedResult(List<ICompletionProposal> proposals, long expiresAtMillis) {
-        boolean isExpired() {
-            return System.currentTimeMillis() >= expiresAtMillis;
-        }
-    }
-
-    private static final ConcurrentHashMap<String, CachedResult> RESULTS = new ConcurrentHashMap<>();
 
     @Override
     public List<ICompletionProposal> getClientCompletionProposals(ITextViewer viewer, int offset) {
@@ -91,19 +86,23 @@ public final class AiAbapProposalsProvider implements IClientProposalsProvider {
             return List.of();
         }
 
-        String key = context.fingerprint();
-        CachedResult cached = RESULTS.get(key);
-        if (cached != null) {
-            if (!cached.isExpired()) return cached.proposals();
-            RESULTS.remove(key, cached);
+        String key = GhostTextController.cacheKey(context, true);
+        String cachedInsertion = CompletionCache.get().get(key);
+        if (cachedInsertion != null && !cachedInsertion.isBlank()) {
+            return List.of(buildProposal(cachedInsertion, context, runtime));
         }
 
-        CompletableFuture<List<ICompletionProposal>> future =
-            PENDING.computeIfAbsent(key, ignored -> fetchAsync(context, document, runtime, key));
+        CompletableFuture<String> future =
+            PENDING.computeIfAbsent(key, ignored -> fetchAsync(context, document, key));
 
         try {
-            return future.get(MAX_BLOCK_MILLIS, TimeUnit.MILLISECONDS);
+            String insertion = future.get(MAX_BLOCK_MILLIS, TimeUnit.MILLISECONDS);
+            return insertion == null || insertion.isBlank() ? List.of() : List.of(buildProposal(insertion, context, runtime));
         } catch (TimeoutException stillRunning) {
+            // The popup's patience ran out, not the request itself: when it
+            // lands, offer it to ghost text instead of throwing it away.
+            IDocument requestDocument = document;
+            future.thenAccept(insertion -> GhostTextController.get().offerCompletion(requestDocument, context, insertion));
             return List.of();
         } catch (Exception error) {
             PENDING.remove(key, future);
@@ -111,68 +110,51 @@ public final class AiAbapProposalsProvider implements IClientProposalsProvider {
         }
     }
 
-    private static CompletableFuture<List<ICompletionProposal>> fetchAsync(
-        CodeContext context, IDocument document, RuntimeSnapshot runtime, String key
-    ) {
-        CompletableFuture<List<ICompletionProposal>> future =
-            CompletableFuture.supplyAsync(() -> fetch(context, document, runtime), EXECUTOR);
-        future.whenComplete((result, error) -> {
+    private static CompletableFuture<String> fetchAsync(CodeContext context, IDocument document, String key) {
+        CompletableFuture<String> future = CompletableFuture.supplyAsync(() -> fetch(context, document), EXECUTOR);
+        future.whenComplete((insertion, error) -> {
             PENDING.remove(key, future);
-            if (error == null && result != null && !result.isEmpty()) {
-                cacheResult(key, result);
+            if (error == null && insertion != null && !insertion.isBlank()) {
+                CompletionCache.get().put(key, insertion);
             }
         });
         return future;
     }
 
-    /**
-     * Bounds RESULTS by count, not just TTL: without a cap, rapid typing
-     * without ever revisiting a position would grow one entry per keystroke
-     * for the full TTL window.
-     */
-    private static void cacheResult(String key, List<ICompletionProposal> result) {
-        if (RESULTS.size() >= MAX_CACHED_RESULTS) {
-            RESULTS.values().removeIf(CachedResult::isExpired);
-        }
-        if (RESULTS.size() >= MAX_CACHED_RESULTS) {
-            var oldest = RESULTS.keySet().iterator();
-            if (oldest.hasNext()) {
-                RESULTS.remove(oldest.next());
-            }
-        }
-        RESULTS.put(key, new CachedResult(result, System.currentTimeMillis() + RESULT_TTL_MILLIS));
-    }
-
-    private static List<ICompletionProposal> fetch(
-        CodeContext context, IDocument document, RuntimeSnapshot runtime
-    ) {
+    private static String fetch(CodeContext context, IDocument document) {
         try {
-            CompletionResponse response = AiRuntime.get().complete(context, new NullProgressMonitor());
+            CompletionResponse response = AiRuntime.get().complete(context, new NullProgressMonitor(), true);
             if (!context.isCurrent(document)) {
-                return List.of();
+                return "";
             }
-            String insertion = new CompletionSanitizer().sanitize(response.content(), context);
-            if (insertion.isBlank()) {
-                return List.of();
-            }
-            return List.of(new CompletionProposal(
-                insertion,
-                context.cursorOffset(),
-                0,
-                insertion.length(),
-                null,
-                "AI suggestion · " + runtime.resolvedModelId(),
-                null,
-                "Generated by " + response.responseModel()
-            ));
+            return new CompletionSanitizer().sanitize(response.content(), context);
         } catch (OperationCanceledException ignored) {
-            return List.of();
+            return "";
         } catch (ApiException error) {
-            AiPlugin.logError("ABAP AI completion failed: " + error.getMessage(), error);
-            return List.of();
+            logCompletionError(error);
+            return "";
         } catch (Exception error) {
             AiPlugin.logError("ABAP AI completion failed.", error);
-            return List.of();
+            return "";
         }
+    }
+
+    /** EMPTY_COMPLETION is a routine "model had nothing to add" outcome, not a fault -- logging it as an error is just noise. */
+    private static void logCompletionError(ApiException error) {
+        if ("EMPTY_COMPLETION".equals(error.errorCode())) return;
+        AiPlugin.logError("ABAP AI completion failed: " + error.getMessage(), error);
+    }
+
+    private static ICompletionProposal buildProposal(String insertion, CodeContext context, RuntimeSnapshot runtime) {
+        return new CompletionProposal(
+            insertion,
+            context.cursorOffset(),
+            0,
+            insertion.length(),
+            null,
+            "AI suggestion · " + runtime.resolvedModelId(),
+            null,
+            "Generated by " + runtime.resolvedModelId()
+        );
     }
 }

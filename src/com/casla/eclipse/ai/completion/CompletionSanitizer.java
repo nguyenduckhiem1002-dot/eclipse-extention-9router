@@ -21,11 +21,26 @@ public final class CompletionSanitizer {
         return value;
     }
 
+    /**
+     * A short match (under 8 chars) is only trusted as an echoed prefix -- not
+     * a coincidence -- when it is pure identifier/number characters (so it can
+     * never eat leading indentation, which is whitespace) and sits at a word
+     * boundary in `before` (so "...i" followed by a completion starting "if"
+     * doesn't get chopped to "f ..."). Long matches (>=8 chars) are unlikely
+     * to be a coincidence either way and keep the original unconditional cut.
+     */
     private static String removeRepeatedPrefix(String completion, String before) {
         int max = Math.min(Math.min(completion.length(), before.length()), 500);
-        for (int length = max; length >= 8; length--) {
-            String suffix = before.substring(before.length() - length);
-            if (completion.startsWith(suffix)) return completion.substring(length);
+        for (int length = max; length >= 1; length--) {
+            int suffixStart = before.length() - length;
+            String suffix = before.substring(suffixStart);
+            if (!completion.startsWith(suffix)) continue;
+            if (length >= 8) return completion.substring(length);
+            boolean isIdentifierRun = !suffix.isBlank()
+                && suffix.chars().allMatch(Character::isJavaIdentifierPart);
+            boolean atWordBoundary = suffixStart == 0
+                || !Character.isJavaIdentifierPart(before.charAt(suffixStart - 1));
+            if (isIdentifierRun && atWordBoundary) return completion.substring(length);
         }
         return completion;
     }
