@@ -37,14 +37,16 @@ import com.casla.eclipse.ai.runtime.AiRuntime;
  * To avoid that, the request runs on a background executor and this method
  * blocks for at most MAX_BLOCK_MILLIS -- short enough not to read as a
  * freeze, long enough to catch a fast response. A slower request keeps
- * running in the background and its result is cached under the exact
- * document+offset fingerprint, so the next invocation at the same position
- * (typically moments away, since ADT re-queries providers as the popup
- * stays open or is re-opened) can return it instantly instead of blocking
- * again.
+ * running in the background; once it lands, the result is kept in RESULTS
+ * under the exact document+offset fingerprint (not just deduped in-flight),
+ * so the next invocation at the same position -- typically moments away,
+ * since ADT re-queries providers as the popup stays open or is re-opened --
+ * returns it instantly instead of blocking again.
  */
 public final class AiAbapProposalsProvider implements IClientProposalsProvider {
-    private static final long MAX_BLOCK_MILLIS = 400;
+    private static final long MAX_BLOCK_MILLIS = 1200;
+    private static final long RESULT_TTL_MILLIS = 60_000;
+    private static final int MAX_CACHED_RESULTS = 32;
 
     // Daemon threads: nothing outside this class references AiPlugin, so
     // there is no shutdown hook to release this executor explicitly without
@@ -58,6 +60,14 @@ public final class AiAbapProposalsProvider implements IClientProposalsProvider {
 
     private static final ConcurrentHashMap<String, CompletableFuture<List<ICompletionProposal>>> PENDING =
         new ConcurrentHashMap<>();
+
+    private record CachedResult(List<ICompletionProposal> proposals, long expiresAtMillis) {
+        boolean isExpired() {
+            return System.currentTimeMillis() >= expiresAtMillis;
+        }
+    }
+
+    private static final ConcurrentHashMap<String, CachedResult> RESULTS = new ConcurrentHashMap<>();
 
     @Override
     public List<ICompletionProposal> getClientCompletionProposals(ITextViewer viewer, int offset) {
@@ -82,6 +92,12 @@ public final class AiAbapProposalsProvider implements IClientProposalsProvider {
         }
 
         String key = context.fingerprint();
+        CachedResult cached = RESULTS.get(key);
+        if (cached != null) {
+            if (!cached.isExpired()) return cached.proposals();
+            RESULTS.remove(key, cached);
+        }
+
         CompletableFuture<List<ICompletionProposal>> future =
             PENDING.computeIfAbsent(key, ignored -> fetchAsync(context, document, runtime, key));
 
@@ -100,8 +116,31 @@ public final class AiAbapProposalsProvider implements IClientProposalsProvider {
     ) {
         CompletableFuture<List<ICompletionProposal>> future =
             CompletableFuture.supplyAsync(() -> fetch(context, document, runtime), EXECUTOR);
-        future.whenComplete((result, error) -> PENDING.remove(key, future));
+        future.whenComplete((result, error) -> {
+            PENDING.remove(key, future);
+            if (error == null && result != null && !result.isEmpty()) {
+                cacheResult(key, result);
+            }
+        });
         return future;
+    }
+
+    /**
+     * Bounds RESULTS by count, not just TTL: without a cap, rapid typing
+     * without ever revisiting a position would grow one entry per keystroke
+     * for the full TTL window.
+     */
+    private static void cacheResult(String key, List<ICompletionProposal> result) {
+        if (RESULTS.size() >= MAX_CACHED_RESULTS) {
+            RESULTS.values().removeIf(CachedResult::isExpired);
+        }
+        if (RESULTS.size() >= MAX_CACHED_RESULTS) {
+            var oldest = RESULTS.keySet().iterator();
+            if (oldest.hasNext()) {
+                RESULTS.remove(oldest.next());
+            }
+        }
+        RESULTS.put(key, new CachedResult(result, System.currentTimeMillis() + RESULT_TTL_MILLIS));
     }
 
     private static List<ICompletionProposal> fetch(
