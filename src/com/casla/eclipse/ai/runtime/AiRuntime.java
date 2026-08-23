@@ -27,6 +27,7 @@ import com.casla.eclipse.ai.client.OpenAiCompatibleClient;
 import com.casla.eclipse.ai.completion.CodeContext;
 import com.casla.eclipse.ai.completion.CompletionPromptBuilder;
 import com.casla.eclipse.ai.completion.CompletionSanitizer;
+import com.casla.eclipse.ai.completion.ValidationPipeline;
 import com.casla.eclipse.ai.preferences.AiPreferences;
 
 public final class AiRuntime {
@@ -271,7 +272,7 @@ public final class AiRuntime {
      */
     private CompletionResponse sanitizeOrThrow(CompletionResponse response, CodeContext context) throws ApiException {
         String insertion = new CompletionSanitizer().sanitize(response.content(), context);
-        if (insertion.isBlank()) {
+        if (insertion.isBlank() || ValidationPipeline.isUnsafe(insertion, context.structureHint())) {
             throw new ApiException(200, "EMPTY_COMPLETION", "The model returned an empty completion.");
         }
         return new CompletionResponse(
