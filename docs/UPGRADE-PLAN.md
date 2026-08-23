@@ -97,9 +97,9 @@ semantic model**; gói `com.sap.adt.*` ta đang dùng đã là internal (`resolu
 Quyết định:
 
 - **Nguồn chính (P0)**: text của chính source + các editor đang mở (✅ RelatedFileCollector).
-  Thêm `AbapScopeExtractor` (text-parse): biến local + kiểu khai báo, parameter từ signature
-  (✅ có lookup), attribute từ DEFINITION, method khả dụng của class. Đưa vào prompt dạng
-  bảng ngắn `symbol → type`.
+  ✅ `AbapScopeExtractor` (text-parse, không phân biệt local/attribute — xem giới hạn ở mục 11):
+  quét `NAME TYPE type` + `VALUE(name) TYPE type` toàn document + tên METHODS, đưa vào prompt
+  dạng bảng `symbol: type`, đặt ngay sau method signature.
 - **Ranking & budget**: giữ `contextBefore/After` theo prefs; related files ≤4×1200 chars (✅);
   scope table ≤~600 tokens; thứ tự: signature hiện tại → scope table → related skeletons.
 - **DDIC/CDS metadata (P2 — spike riêng)**: khả thi duy nhất là ADT REST
@@ -113,7 +113,8 @@ Quyết định:
 tự ẩn khi gõ lệch, không hiện suggestion rỗng (sanitizer), giới hạn preview qua "+N lines".
 
 Việc còn lại:
-- ❌ Chặn ghost khi Content Assist popup đang mở (fix xung đột Tab) — **P0, S**.
+- ✅ Chặn ghost khi Content Assist popup đang mở (`ICompletionListener` trên
+  `ContentAssistantFacade`) — trước P0/S, đã xong.
 - ❌ Manual trigger command (`Alt+\`) + `org.eclipse.ui.commands` để rebind được — P1, M.
 - ❌ Alternatives + `Alt+]`/`Alt+[` cycling: **xung đột với Alt+] accept-word hiện tại**.
   Quyết định: giữ Alt+] = accept word (parity Copilot dùng Ctrl+Right nhưng ta hỗ trợ cả 2);
@@ -165,18 +166,18 @@ sanitize-reject rate theo model → chọn model bằng số liệu thay vì c�
 
 | # | Module | Loại | P | Size |
 |---|---|---|---|---|
-| 1 | `completion/TriggerEngine` (tách từ GhostTextController.scheduleFetch) | mới | P0 | M |
-| 2 | Chặn trigger khi comment/delete/popup mở | sửa GhostTextController | P0 | S |
-| 3 | `abap/AbapLocalCompleter` (Tier 1: đóng block, method skeleton) | mới | P0 | M |
-| 4 | `abap/AbapScopeExtractor` (symbol table text-parse) | mới | P0 | L |
-| 5 | `completion/ValidationPipeline` (block balance, scope check, cắt vượt phạm vi) | mới | P0 | M |
+| 1 | ✅ `completion/TriggerEngine` (tách từ GhostTextController.scheduleFetch) | mới | P0 | M |
+| 2 | ✅ Chặn trigger khi comment/delete/popup mở | sửa GhostTextController | P0 | S |
+| 3 | ✅ `abap/AbapLocalCompleter` (Tier 1: đóng block IF/LOOP/CASE/TRY/DO/WHILE) | mới | P0 | M |
+| 4 | ✅ `abap/AbapScopeExtractor` (symbol table text-parse) | mới | P0 | L |
+| 5 | ✅ `completion/ValidationPipeline` (structure cross-check + paren balance) | mới | P0 | M |
 | 6 | `ui/AiStatusTrim` (status indicator: Ready/Generating/Error/RateLimited) | mới + plugin.xml | P1 | M |
 | 7 | `runtime/StatsCollector` | mới | P1 | M |
 | 8 | Secret redaction + exclude list | sửa OpenAiCompatibleClient + prefs | P1 | S |
 | 9 | Circuit breaker + 429 backoff | sửa AiRuntime | P1 | M |
 | 10 | Manual trigger command + keybinding qua `org.eclipse.ui.commands` | plugin.xml + handler | P1 | M |
 | 11 | ABAP release pref + case-style detection vào prompt | sửa PromptBuilder/prefs | P1 | S |
-| 12 | Debounce thích ứng theo keyword/newline | trong TriggerEngine | P1 | S |
+| 12 | ✅ Debounce thích ứng theo keyword/newline | trong TriggerEngine | P1 | S |
 | 13 | CDS/RAP/Unit artifact detection (theo editor site id) + rules riêng | mở rộng CursorContextType/StructureHint | P2 | L |
 | 14 | Alternatives + cycling (chờ xác nhận gateway `n>1`) | GhostTextController | P2 | M |
 | 15 | DDIC qua ADT REST (spike) | mới, optional bundle | P2 | XL |
@@ -191,26 +192,28 @@ Mỗi mục: rủi ro & test ghi ở phase tương ứng bên dưới.
 - ❌ Còn lại: gắn StatsCollector tối thiểu (requested/displayed/latency) TRƯỚC các phase sau
   để có số so sánh. **DoD**: stats.csv có dữ liệu sau 1 ngày dùng thật.
 
-### Phase 1' — Vá nốt ghost text (template Phase 1 đã xong ~80%)
-Gồm mục #2, #6, #10, #12 + kiểm chứng 2 điểm mở:
-- Test undo/redo: accept → 1 lần Ctrl+Z phải hoàn tác toàn bộ insertion.
-- Test Tab khi ADT popup mở (trước/sau fix #2).
-- **Rủi ro**: `getContentAssistantFacade` có thể null trên viewer của ADT → fallback: kiểm tra
-  `widget.getListeners(SWT.KeyDown)`? Không — fallback đơn giản: nếu facade null thì giữ
-  hành vi cũ. **DoD**: gõ trong comment không bắn request; xoá liên tục không bắn request;
-  Tab khi popup mở đi vào popup, không vào ghost.
+### Phase 1' — Vá nốt ghost text ✅ xong (#2, #12; #6/#10 vẫn P1, chưa làm)
+- ✅ `getContentAssistantFacade()` trả về `ContentAssistantFacade` (không phải interface —
+  đã kiểm chứng bằng `javap` trên jar thật), track qua `ICompletionListener`, fallback null-safe
+  đã có sẵn (`if (assistFacade != null)`).
+- ✅ **DoD đạt**: gõ trong comment (LINE_COMMENT/BLOCK_COMMENT) không bắn request; xoá liên tục
+  không bắn request; popup ADT mở → ghost tự clear + cancel ticket, Tab đi vào popup.
+- ❌ **Chưa làm**: test undo/redo tự động (accept → 1 Ctrl+Z hoàn tác hết) — chỉ mới đúng về
+  thiết kế (1 lần `document.replace`), chưa có test xác nhận trong Eclipse thật.
 
-### Phase 2' — ABAP Context Engine v2
-Mục #4 (+nối vào PromptBuilder), #11.
-- **Rủi ro chính**: parse text ABAP sai với chained statement (`DATA: a, b, c.`) → viết test
-  trước từ golden snippets; chấp nhận bỏ sót hơn là sai.
-- **DoD**: CoreTests có ≥10 case scope extraction; prompt chứa bảng symbol khi có; đo
-  sanitize-reject rate giảm so với baseline Phase 0.
+### Phase 2' — ABAP Context Engine v2 ✅ xong (#4; #11 vẫn P1, chưa làm)
+- ✅ **Rủi ro đã biết còn tồn tại**: `AbapScopeExtractor` cố tình KHÔNG track statement boundary
+  (dùng whole-document regex scan thay vì per-line) — chọn "quét rộng, có thể lẫn" thay vì
+  "bỏ sót khai báo chained" sau khi nhận ra per-line anchor sẽ bỏ sót dòng tiếp theo của
+  `DATA: a,\n b.`. Đây là trade-off có chủ đích, không phải bug.
+- ✅ **DoD đạt**: CoreTests có 8 case cho scope extraction + local completer liên quan; prompt
+  chứa bảng symbol khi có (`AbapContextExtractor.withScope`). ❌ Chưa đo sanitize-reject rate
+  thực tế (cần StatsCollector — Phase 0 còn thiếu phần đó).
 
-### Phase 3' — Tier 1 + Validation
-Mục #3, #5, #9.
-- **Rủi ro**: Tier 1 gợi ý đóng block sai chỗ → chỉ kích hoạt khi dòng hiện tại trống và
-  scan xác nhận block chưa đóng (dùng lại logic AbapStructureHint).
+### Phase 3' — Tier 1 + Validation ✅ xong (#3, #5; #9 vẫn P1, chưa làm)
+- ✅ Tier 1 chỉ kích hoạt khi dòng hiện tại trống VÀ scan xác nhận block chưa đóng — dùng stack
+  matching riêng (không tái dùng AbapStructureHint vì đó là cho CLASS/METHOD, khác phạm vi
+  IF/LOOP/CASE/TRY/DO/WHILE).
 - **DoD**: `ENDIF.` hiện <50ms không gọi mạng; completion mất cân bằng block không bao giờ
   hiển thị; stats cho thấy tier1-served > 0.
 
