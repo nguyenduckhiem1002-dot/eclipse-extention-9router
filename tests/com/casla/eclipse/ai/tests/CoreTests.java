@@ -5,6 +5,7 @@ import java.util.Map;
 import java.util.Set;
 
 import org.eclipse.jface.text.Document;
+import org.eclipse.jface.text.DocumentEvent;
 
 import com.casla.eclipse.ai.api.ConnectionConfig;
 import com.casla.eclipse.ai.api.ModelInfo;
@@ -16,7 +17,11 @@ import com.casla.eclipse.ai.completion.ContextExtractor;
 import com.casla.eclipse.ai.completion.CursorContextType;
 import com.casla.eclipse.ai.completion.GhostTextController;
 import com.casla.eclipse.ai.completion.RelatedFileCollector;
+import com.casla.eclipse.ai.completion.TriggerEngine;
+import com.casla.eclipse.ai.completion.ValidationPipeline;
+import com.casla.eclipse.ai.completion.abap.AbapLocalCompleter;
 import com.casla.eclipse.ai.completion.abap.AbapMethodSignatureLookup;
+import com.casla.eclipse.ai.completion.abap.AbapScopeExtractor;
 import com.casla.eclipse.ai.completion.abap.AbapStructureHint;
 import com.casla.eclipse.ai.internal.json.Json;
 import com.casla.eclipse.ai.runtime.ModelResolver;
@@ -58,6 +63,25 @@ public final class CoreTests {
         testAbapMethodSignatureLookupIgnoresMethodsInOtherClass();
         testAbapStructureHintEnclosingMethodNameOnlyInsideImplementation();
         testGhostCacheKeyDiffersByShape();
+        testTriggerEngineDetectsDeletion();
+        testTriggerEngineBlocksAutoTriggerInOrdinaryComments();
+        testTriggerEngineAllowsAutoTriggerInStringAndJavadoc();
+        testTriggerEngineFastDebounceAfterNewline();
+        testTriggerEngineFastDebounceAfterTriggerKeyword();
+        testTriggerEngineNormalDebounceMidIdentifier();
+        testAbapLocalCompleterClosesSimpleIf();
+        testAbapLocalCompleterClosesNestedBlock();
+        testAbapLocalCompleterSkipsAlreadyClosedBlock();
+        testAbapLocalCompleterStopsAtMethodBoundary();
+        testAbapLocalCompleterNoSuggestionOnNonBlankLine();
+        testAbapScopeExtractorFindsDeclarationsAndMethods();
+        testAbapScopeExtractorFindsValueParameter();
+        testAbapScopeExtractorEmptyWhenNothingFound();
+        testValidationPipelineRejectsMethodBodyInDefinition();
+        testValidationPipelineRejectsMethodsDeclarationInImplementation();
+        testValidationPipelineAllowsNormalCodeInDefinition();
+        testValidationPipelineRejectsUnbalancedParens();
+        testValidationPipelineAllowsBalancedConstructorExpression();
         System.out.println("Core tests passed: " + passed);
     }
 
@@ -493,6 +517,166 @@ public final class CoreTests {
         String blockKey = GhostTextController.cacheKey(ctx, false);
         String lineKey = GhostTextController.cacheKey(ctx, true);
         check(!blockKey.equals(lineKey), "Cache key differs between block and single-line shapes so they never cross-serve");
+    }
+
+    private static void testTriggerEngineDetectsDeletion() {
+        Document doc = new Document("abc");
+        DocumentEvent deletion = new DocumentEvent(doc, 1, 1, "");
+        DocumentEvent insertion = new DocumentEvent(doc, 1, 0, "x");
+        check(TriggerEngine.isDeletion(deletion), "Pure deletion is detected");
+        check(!TriggerEngine.isDeletion(insertion), "Plain insertion is not a deletion");
+    }
+
+    private static void testTriggerEngineBlocksAutoTriggerInOrdinaryComments() {
+        check(TriggerEngine.blocksAutoTrigger(CursorContextType.LINE_COMMENT), "Line comments block auto-trigger");
+        check(TriggerEngine.blocksAutoTrigger(CursorContextType.BLOCK_COMMENT), "Block comments block auto-trigger");
+    }
+
+    private static void testTriggerEngineAllowsAutoTriggerInStringAndJavadoc() {
+        // Deliberately not blocked: CompletionPromptBuilder has dedicated
+        // roles for completing Javadoc/ABAP-doc text and string content.
+        check(!TriggerEngine.blocksAutoTrigger(CursorContextType.STRING_LITERAL), "String literals still trigger");
+        check(!TriggerEngine.blocksAutoTrigger(CursorContextType.JAVADOC), "Javadoc still triggers");
+        check(!TriggerEngine.blocksAutoTrigger(CursorContextType.CODE), "Ordinary code still triggers");
+    }
+
+    private static void testTriggerEngineFastDebounceAfterNewline() {
+        Document doc = new Document("IF x = 1.\n");
+        DocumentEvent event = new DocumentEvent(doc, 9, 0, "\n");
+        int delay = TriggerEngine.debounceMillis(event, "", 500);
+        check(delay < 500, "Debounce is faster right after a newline: was " + delay);
+    }
+
+    private static void testTriggerEngineFastDebounceAfterTriggerKeyword() {
+        Document doc = new Document("  DATA ");
+        DocumentEvent event = new DocumentEvent(doc, 6, 0, " ");
+        int delay = TriggerEngine.debounceMillis(event, "  DATA ", 500);
+        check(delay < 500, "Debounce is faster right after 'DATA ': was " + delay);
+    }
+
+    private static void testTriggerEngineNormalDebounceMidIdentifier() {
+        Document doc = new Document("  lv_cou");
+        DocumentEvent event = new DocumentEvent(doc, 7, 0, "u");
+        int delay = TriggerEngine.debounceMillis(event, "  lv_cou", 500);
+        check(delay == 500, "Debounce stays at the configured value mid-identifier: was " + delay);
+    }
+
+    private static void testAbapLocalCompleterClosesSimpleIf() {
+        String source = """
+            IF x = 1.
+            <CURSOR>
+            """;
+        String suggestion = AbapLocalCompleter.suggest(document(source), source.indexOf("<CURSOR>"));
+        check("ENDIF.".equals(suggestion), "Closes a simple IF: was '" + suggestion + "'");
+    }
+
+    private static void testAbapLocalCompleterClosesNestedBlock() {
+        String source = """
+            LOOP AT it_table INTO wa.
+              IF wa > 0.
+            <CURSOR>
+            """;
+        String suggestion = AbapLocalCompleter.suggest(document(source), source.indexOf("<CURSOR>"));
+        check("ENDIF.".equals(suggestion), "Closes the innermost open block first: was '" + suggestion + "'");
+    }
+
+    private static void testAbapLocalCompleterSkipsAlreadyClosedBlock() {
+        String source = """
+            LOOP AT it_table INTO wa.
+              IF wa > 0.
+                result = wa.
+              ENDIF.
+            <CURSOR>
+            """;
+        String suggestion = AbapLocalCompleter.suggest(document(source), source.indexOf("<CURSOR>"));
+        check("ENDLOOP.".equals(suggestion), "Skips the already-closed IF and closes the LOOP: was '" + suggestion + "'");
+    }
+
+    private static void testAbapLocalCompleterStopsAtMethodBoundary() {
+        String source = """
+            METHOD other.
+              IF x = 1.
+              ENDIF.
+            ENDMETHOD.
+
+            METHOD get_max.
+            <CURSOR>
+            """;
+        String suggestion = AbapLocalCompleter.suggest(document(source), source.indexOf("<CURSOR>"));
+        check(suggestion.isEmpty(), "Never reaches across a method boundary: was '" + suggestion + "'");
+    }
+
+    private static void testAbapLocalCompleterNoSuggestionOnNonBlankLine() {
+        String source = """
+            IF x = 1.
+              DAT<CURSOR>
+            """;
+        String suggestion = AbapLocalCompleter.suggest(document(source), source.indexOf("<CURSOR>"));
+        check(suggestion.isEmpty(), "No suggestion when the cursor's own line already has content: was '" + suggestion + "'");
+    }
+
+    private static void testAbapScopeExtractorFindsDeclarationsAndMethods() {
+        String source = """
+            DATA: lv_count TYPE i,
+                  lv_name  TYPE string.
+
+            METHODS get_max
+              IMPORTING it_table TYPE ty_numbers
+              RETURNING VALUE(result) TYPE i.
+            """;
+        String description = AbapScopeExtractor.describe(source);
+        check(description.contains("lv_count: i"), "Finds a local DATA declaration: was '" + description + "'");
+        check(description.contains("lv_name: string"), "Finds a chained DATA declaration: was '" + description + "'");
+        check(description.contains("it_table: ty_numbers"), "Finds an IMPORTING parameter: was '" + description + "'");
+        check(description.contains("result: i"), "Finds a VALUE() RETURNING parameter: was '" + description + "'");
+        check(description.contains("get_max"), "Lists the method name: was '" + description + "'");
+    }
+
+    private static void testAbapScopeExtractorFindsValueParameter() {
+        String description = AbapScopeExtractor.describe("METHODS run RETURNING VALUE(rv_result) TYPE string.");
+        check(description.contains("rv_result: string"), "Finds a VALUE() parameter outside a DATA block: was '" + description + "'");
+    }
+
+    private static void testAbapScopeExtractorEmptyWhenNothingFound() {
+        String description = AbapScopeExtractor.describe("result = 1.\nENDMETHOD.");
+        check(description.isEmpty(), "Empty when nothing declares a type or a method: was '" + description + "'");
+    }
+
+    private static void testValidationPipelineRejectsMethodBodyInDefinition() {
+        boolean unsafe = ValidationPipeline.isUnsafe(
+            "METHOD get_min.\n  result = 0.\nENDMETHOD.",
+            "Class ZCL_TEST_CLAUDE, DEFINITION, PUBLIC SECTION"
+        );
+        check(unsafe, "Rejects a METHOD/ENDMETHOD body suggested inside a DEFINITION section");
+    }
+
+    private static void testValidationPipelineRejectsMethodsDeclarationInImplementation() {
+        boolean unsafe = ValidationPipeline.isUnsafe(
+            "METHODS get_min\n  IMPORTING it_table TYPE ty_numbers.",
+            "Class ZCL_TEST_CLAUDE, IMPLEMENTATION, inside METHOD get_max"
+        );
+        check(unsafe, "Rejects a METHODS declaration suggested inside an IMPLEMENTATION section");
+    }
+
+    private static void testValidationPipelineAllowsNormalCodeInDefinition() {
+        boolean unsafe = ValidationPipeline.isUnsafe(
+            "METHODS get_min\n  IMPORTING it_table TYPE ty_numbers.",
+            "Class ZCL_TEST_CLAUDE, DEFINITION, PUBLIC SECTION"
+        );
+        check(!unsafe, "A normal METHODS declaration inside DEFINITION is not flagged");
+    }
+
+    private static void testValidationPipelineRejectsUnbalancedParens() {
+        boolean unsafe = ValidationPipeline.isUnsafe("result = REDUCE i( INIT max = 1", "");
+        check(unsafe, "Rejects an expression with an unclosed paren");
+    }
+
+    private static void testValidationPipelineAllowsBalancedConstructorExpression() {
+        boolean unsafe = ValidationPipeline.isUnsafe(
+            "result = REDUCE i( INIT max = 1 FOR wa IN it_table NEXT max = COND #( WHEN wa > max THEN wa ELSE max ) ).",
+            ""
+        );
+        check(!unsafe, "A balanced constructor expression is not flagged");
     }
 
     private static Document document(String text) {
