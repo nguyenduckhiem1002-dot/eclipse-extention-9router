@@ -2,7 +2,7 @@ Manifest-Version: 1.0
 Bundle-ManifestVersion: 2
 Bundle-Name: Casla AI Code Assistant
 Bundle-SymbolicName: com.casla.eclipse.ai;singleton:=true
-Bundle-Version: 0.1.0
+Bundle-Version: 0.2.0
 Bundle-Vendor: Casla Group
 Bundle-Activator: com.casla.eclipse.ai.AiPlugin
 Bundle-RequiredExecutionEnvironment: JavaSE-21

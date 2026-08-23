@@ -1,7 +1,7 @@
 param(
     [string]$EclipseRoot = "",
     [string]$JdkRoot = "",
-    [string]$Version = "0.1.0"
+    [string]$Version = "0.2.0"
 )
 
 $ErrorActionPreference = "Stop"
@@ -67,11 +67,28 @@ foreach ($required in @($Javac, $Java, $Jar, $EquinoxLauncher)) {
     if (-not (Test-Path $required)) { throw "Required build tool not found: $required (EclipseRoot: $EclipseRoot, JdkRoot: $JdkRoot)" }
 }
 
+# SAP ABAP Development Tools is not part of the public Eclipse download (it
+# requires a separate install from SAP's own update site), so a vanilla
+# EclipseRoot -- like the one CI downloads fresh every run -- won't have it.
+# MANIFEST.MF already marks the ADT bundles resolution:=optional for exactly
+# this reason; AiAbapProposalsProvider is the one class that imports an ADT
+# type directly, so without ADT present it's excluded from this build. Ghost
+# text's ABAP support (GhostTextController, AbapContextExtractor, and the
+# rest of the abap package) has no ADT import and is unaffected either way.
+$AdtAvailable = $null -ne (Get-ChildItem (Join-Path $EclipseRoot "plugins") -Filter "com.sap.adt.util.ui_*.jar" -ErrorAction SilentlyContinue | Select-Object -First 1)
+if (-not $AdtAvailable) {
+    Write-Host "SAP ADT not found under $EclipseRoot\plugins -- building without the ABAP Ctrl+Space popup provider (ghost text is unaffected)."
+}
+
 if (Test-Path $BuildRoot) { Remove-Item -LiteralPath $BuildRoot -Recurse -Force }
 if (Test-Path $Dist) { Remove-Item -LiteralPath $Dist -Recurse -Force }
 New-Item -ItemType Directory -Force $Classes, $TestClasses, $PublisherSource, $P2Repository, $JavaTemp, $Dist | Out-Null
 
+$AdtOnlySource = Join-Path $ProjectRoot "src\com\casla\eclipse\ai\completion\abap\AiAbapProposalsProvider.java"
 $SourceFiles = Get-ChildItem (Join-Path $ProjectRoot "src") -Recurse -Filter "*.java" | Select-Object -ExpandProperty FullName
+if (-not $AdtAvailable) {
+    $SourceFiles = $SourceFiles | Where-Object { $_ -ne $AdtOnlySource }
+}
 & $Javac --release 21 -encoding UTF-8 -cp "$EclipseRoot\plugins\*" -d $Classes $SourceFiles
 if ($LASTEXITCODE -ne 0) { throw "Plugin compilation failed." }
 
@@ -89,7 +106,19 @@ $PluginStage = Join-Path $BuildRoot "plugin-stage"
 New-Item -ItemType Directory -Force $PluginStage | Out-Null
 Copy-Item -Path (Join-Path $Classes "*") -Destination $PluginStage -Recurse
 Copy-Item -Path (Join-Path $ProjectRoot "icons") -Destination $PluginStage -Recurse
-Copy-Item -Path (Join-Path $ProjectRoot "plugin.xml") -Destination $PluginStage
+
+$PluginXml = Get-Content (Join-Path $ProjectRoot "plugin.xml") -Raw
+if (-not $AdtAvailable) {
+    # Without AiAbapProposalsProvider in the jar, declaring this extension
+    # would point at a class that doesn't exist in this particular build.
+    $PluginXml = [regex]::Replace(
+        $PluginXml,
+        '(?s)\r?\n\s*<extension\s+point="com\.sap\.adt\.tools\.abapsource\.ui\.clientProposalProvider">.*?</extension>\r?\n',
+        "`n"
+    )
+}
+Set-Content -Path (Join-Path $PluginStage "plugin.xml") -Value $PluginXml -Encoding UTF8 -NoNewline
+
 Copy-Item -Path (Join-Path $ProjectRoot "README.md") -Destination $PluginStage
 Copy-Item -Path (Join-Path $ProjectRoot "LICENSE") -Destination $PluginStage
 

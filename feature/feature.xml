@@ -2,7 +2,7 @@
 <feature
     id="com.casla.eclipse.ai.feature"
     label="Casla AI Code Assistant"
-    version="0.1.0"
+    version="0.2.0"
     provider-name="Casla Group">
   <description>
     AI-assisted Java code completion for Eclipse using an OpenAI-compatible endpoint.

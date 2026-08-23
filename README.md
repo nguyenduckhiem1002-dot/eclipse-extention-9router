@@ -30,7 +30,7 @@ http://localhost:20128/v1
 
 ## Install using the p2 ZIP
 
-1. Extract `casla-eclipse-ai-assistant-0.1.0-p2.zip` to a folder.
+1. Extract `casla-eclipse-ai-assistant-0.2.0-p2.zip` to a folder.
 2. In Eclipse, open **Help → Install New Software**.
 3. Click **Add → Local** and select the extracted folder.
 4. Select **Casla AI Code Assistant** and complete installation.
@@ -38,7 +38,7 @@ http://localhost:20128/v1
 
 ## Dropins fallback
 
-Extract `casla-eclipse-ai-assistant-0.1.0-dropins.zip` directly into the Eclipse installation directory, preserving the `dropins/casla-ai/plugins/...` layout, then restart Eclipse with `-clean` once.
+Extract `casla-eclipse-ai-assistant-0.2.0-dropins.zip` directly into the Eclipse installation directory, preserving the `dropins/casla-ai/plugins/...` layout, then restart Eclipse with `-clean` once.
 
 ## Configure
 
@@ -83,9 +83,9 @@ Remove-Item Env:AI_CODE_ASSISTANT_API_KEY
 Artifacts are written to `dist/`:
 
 ```text
-casla-eclipse-ai-assistant-0.1.0-p2.zip
-casla-eclipse-ai-assistant-0.1.0-dropins.zip
-casla-eclipse-ai-assistant-0.1.0-source.zip
+casla-eclipse-ai-assistant-0.2.0-p2.zip
+casla-eclipse-ai-assistant-0.2.0-dropins.zip
+casla-eclipse-ai-assistant-0.2.0-source.zip
 SHA256SUMS.txt
 ```
 

@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write # needed to publish a GitHub Release on a tag push; read-only otherwise
 
 jobs:
   build:
@@ -35,6 +35,11 @@ jobs:
           Invoke-WebRequest -Uri $url -OutFile $archive
           Expand-Archive -Path $archive -DestinationPath $tools
 
+      # This runner's Eclipse is the plain public download, so it never has
+      # SAP ABAP Development Tools installed (that requires SAP's own update
+      # site). build.ps1 already handles that: it compiles and packages
+      # everything except the one class that imports an ADT type, and ghost
+      # text's ABAP support (the primary path) is unaffected either way.
       - name: Compile, test and publish p2 repository
         shell: pwsh
         run: |
@@ -43,6 +48,15 @@ jobs:
       - name: Upload packaged extension
         uses: actions/upload-artifact@v4
         with:
-          name: casla-eclipse-ai-assistant-0.1.0
+          name: casla-eclipse-ai-assistant-0.2.0
           path: dist/*
           if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem -Path dist -File | ForEach-Object { $_.FullName }
+          gh release create "${{ github.ref_name }}" $files --title "${{ github.ref_name }}" --generate-notes
