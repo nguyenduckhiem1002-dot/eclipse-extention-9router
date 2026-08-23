@@ -18,6 +18,11 @@ import org.eclipse.jface.text.ITextOperationTarget;
 import org.eclipse.jface.text.ITextViewer;
 import org.eclipse.jface.text.ITextViewerExtension;
 import org.eclipse.jface.text.ITextViewerExtension5;
+import org.eclipse.jface.text.contentassist.ContentAssistEvent;
+import org.eclipse.jface.text.contentassist.ICompletionListener;
+import org.eclipse.jface.text.contentassist.ICompletionProposal;
+import org.eclipse.jface.text.source.ContentAssistantFacade;
+import org.eclipse.jface.text.source.ISourceViewerExtension4;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.custom.CaretEvent;
 import org.eclipse.swt.custom.CaretListener;
@@ -39,6 +44,7 @@ import com.casla.eclipse.ai.AiPlugin;
 import com.casla.eclipse.ai.api.CompletionSettings;
 import com.casla.eclipse.ai.client.ApiException;
 import com.casla.eclipse.ai.completion.abap.AbapContextExtractor;
+import com.casla.eclipse.ai.completion.abap.AbapLocalCompleter;
 import com.casla.eclipse.ai.client.CompletionResponse;
 import com.casla.eclipse.ai.preferences.AiPreferences;
 import com.casla.eclipse.ai.runtime.AiRuntime;
@@ -99,10 +105,31 @@ public final class GhostTextController implements IPartListener2, IDocumentListe
     private volatile Ghost ghost;
     /** Set while accept() edits the document, so our own insert is ignored. */
     private boolean accepting;
+    /** Tracks ADT/JDT's own Content Assist popup so ghost text never fights it for Tab. */
+    private volatile boolean popupActive;
+    private ContentAssistantFacade assistFacade;
 
     private final PaintListener painter = this::paintGhost;
     private final CaretListener caretListener = this::caretMoved;
     private final VerifyKeyListener keyListener = this::verifyKey;
+    private final ICompletionListener completionListener = new ICompletionListener() {
+        @Override
+        public void assistSessionStarted(ContentAssistEvent event) {
+            popupActive = true;
+            ticket.incrementAndGet();
+            clearGhost();
+        }
+
+        @Override
+        public void assistSessionEnded(ContentAssistEvent event) {
+            popupActive = false;
+        }
+
+        @Override
+        public void selectionChanged(ICompletionProposal proposal, boolean smart) {
+            // No action needed.
+        }
+    };
 
     private GhostTextController() {}
 
@@ -174,6 +201,10 @@ public final class GhostTextController implements IPartListener2, IDocumentListe
         } else {
             widget.addVerifyKeyListener(keyListener);
         }
+        if (viewer instanceof ISourceViewerExtension4 sourceViewerExtension) {
+            assistFacade = sourceViewerExtension.getContentAssistantFacade();
+            if (assistFacade != null) assistFacade.addCompletionListener(completionListener);
+        }
     }
 
     private void detach() {
@@ -188,6 +219,11 @@ public final class GhostTextController implements IPartListener2, IDocumentListe
         if (viewer instanceof ITextViewerExtension extension) {
             extension.removeVerifyKeyListener(keyListener);
         }
+        if (assistFacade != null) {
+            assistFacade.removeCompletionListener(completionListener);
+            assistFacade = null;
+        }
+        popupActive = false;
         document = null;
         viewer = null;
         widget = null;
@@ -222,7 +258,20 @@ public final class GhostTextController implements IPartListener2, IDocumentListe
             }
             clearGhost();
         }
-        scheduleFetch();
+
+        // A pure deletion isn't a target worth chasing; the popup listener
+        // already clears/cancels when ADT's own Content Assist opens, this
+        // is just defense against a request that was already in flight.
+        if (TriggerEngine.isDeletion(event) || popupActive) return;
+
+        int editEnd = event.getOffset() + (event.getText() == null ? 0 : event.getText().length());
+        String fullText = document.get();
+        CursorContextType contextType = ContextExtractor.detectCursorContext(fullText, editEnd, currentLanguage());
+        if (TriggerEngine.blocksAutoTrigger(contextType)) return;
+
+        int configured = new AiPreferences().completionSettings().debounceMillis();
+        int delay = TriggerEngine.debounceMillis(event, lineTextUpTo(fullText, editEnd), configured);
+        scheduleFetch(delay);
     }
 
     private void scheduleFetch() {
@@ -240,6 +289,23 @@ public final class GhostTextController implements IPartListener2, IDocumentListe
         });
     }
 
+    /** Which prompt "Language" this editor maps to; mirrors the checks in extractContext. */
+    private String currentLanguage() {
+        String label = editor == null || editor.getEditorInput() == null ? "" : editor.getEditorInput().getName();
+        if (label != null && label.endsWith(".java")) return "Java";
+        if (editor != null && editor.getEditorInput() != null
+            && editor.getEditorInput().getAdapter(ICompilationUnit.class) != null) {
+            return "Java";
+        }
+        return RelatedFileCollector.isAbapEditor(editor, label) ? "ABAP" : "Text";
+    }
+
+    private static String lineTextUpTo(String fullText, int offset) {
+        int safeOffset = Math.max(0, Math.min(offset, fullText.length()));
+        int start = fullText.lastIndexOf('\n', Math.max(0, safeOffset - 1)) + 1;
+        return fullText.substring(start, safeOffset);
+    }
+
     /** Runs on the UI thread; captures the context, then leaves the thread. */
     private void requestSuggestion(long requestTicket) {
         if (widget == null || widget.isDisposed() || document == null || viewer == null) return;
@@ -247,6 +313,16 @@ public final class GhostTextController implements IPartListener2, IDocumentListe
 
         int caretModel = widgetToModel(widget.getCaretOffset());
         if (caretModel < 0 || !isEligibleCursorPosition(caretModel)) return;
+
+        // Tier 1: deterministic, no network, no cache needed -- cheap enough
+        // to just recompute on every request.
+        if ("ABAP".equals(currentLanguage())) {
+            String local = AbapLocalCompleter.suggest(document, caretModel);
+            if (!local.isBlank()) {
+                showGhost(new Ghost(caretModel, local));
+                return;
+            }
+        }
 
         CompletionSettings settings = new AiPreferences().completionSettings();
         CodeContext context;
@@ -368,6 +444,7 @@ public final class GhostTextController implements IPartListener2, IDocumentListe
     // ------------------------------------------------------------------- keys
 
     private void verifyKey(VerifyEvent event) {
+        if (popupActive) return;
         Ghost current = ghost;
         if (current == null) return;
 
