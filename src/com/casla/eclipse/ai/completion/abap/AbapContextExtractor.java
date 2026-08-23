@@ -39,8 +39,10 @@ public final class AbapContextExtractor {
         String actualLabel = label != null && !label.isBlank() ? label : activeEditorLabel();
         CursorContextType contextType = ContextExtractor.detectCursorContext(fullDocument, safeOffset, "ABAP");
         String structureHint = AbapStructureHint.scan(document, safeOffset);
-        List<RelatedFileCollector.RelatedFile> relatedFiles =
-            withMethodSignature(new RelatedFileCollector().collect(null, actualLabel), fullDocument, document, safeOffset);
+        List<RelatedFileCollector.RelatedFile> relatedFiles = withScope(
+            withMethodSignature(new RelatedFileCollector().collect(null, actualLabel), fullDocument, document, safeOffset),
+            fullDocument
+        );
 
         return new CodeContext(
             "",
@@ -78,6 +80,25 @@ public final class AbapContextExtractor {
         withSignature.add(new RelatedFileCollector.RelatedFile("(DEFINITION) " + methodName + " signature", signature));
         withSignature.addAll(collected);
         return withSignature;
+    }
+
+    /**
+     * Placed right after the method signature (if any) and ahead of related
+     * open-editor skeletons: a real identifier/type table is a more direct
+     * defense against invented variable names than a preview of another file.
+     */
+    private static List<RelatedFileCollector.RelatedFile> withScope(
+        List<RelatedFileCollector.RelatedFile> collected, String fullDocument
+    ) {
+        String scope = AbapScopeExtractor.describe(fullDocument);
+        if (scope.isBlank()) return collected;
+
+        List<RelatedFileCollector.RelatedFile> withScope = new ArrayList<>(collected.size() + 1);
+        int insertAt = collected.isEmpty() || !collected.get(0).path().startsWith("(DEFINITION)") ? 0 : 1;
+        withScope.addAll(collected.subList(0, insertAt));
+        withScope.add(new RelatedFileCollector.RelatedFile("Scope", scope));
+        withScope.addAll(collected.subList(insertAt, collected.size()));
+        return withScope;
     }
 
     private static int startOfLine(IDocument document, int offset) throws BadLocationException {
