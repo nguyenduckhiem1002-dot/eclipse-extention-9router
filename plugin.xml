@@ -10,22 +10,18 @@
         id="com.casla.eclipse.ai.preferences"
         name="AI Code Assistant"
         class="com.casla.eclipse.ai.preferences.AiPreferencePage"/>
+    <page
+        id="com.casla.eclipse.ai.preferences.adaptive"
+        name="Adaptive Learning"
+        category="com.casla.eclipse.ai.preferences"
+        class="com.casla.eclipse.ai.preferences.AdaptiveLearningPreferencePage"/>
   </extension>
 
-  <!--
-    The extension id must stay unqualified. Eclipse builds the unique id as
-    <plugin-id>.<id> without checking whether the id already repeats the
-    namespace, so id="com.casla.eclipse.ai.completion" would register the
-    category as com.casla.eclipse.ai.com.casla.eclipse.ai.completion, the
-    categoryId below would resolve to nothing, and JDT would silently drop
-    the computer. This matches how JDT declares its own categories.
-  -->
   <extension
       point="org.eclipse.jdt.ui.javaCompletionProposalComputer"
       id="completion"
       name="AI Code Completion">
-    <proposalCategory
-        icon="icons/ai.svg"/>
+    <proposalCategory icon="icons/ai.svg"/>
   </extension>
 
   <extension
@@ -42,15 +38,6 @@
     </javaCompletionProposalComputer>
   </extension>
 
-  <!--
-    ABAP source files are edited by SAP's ABAP Development Tools (ADT), which
-    has its own editor and content-assist framework separate from JDT, so the
-    javaCompletionProposalComputer extension above never fires for them. ADT
-    exposes com.sap.adt.tools.abapsource.ui.clientProposalProvider for exactly
-    this purpose. If ADT is not installed this point does not exist and
-    Eclipse simply ignores the extension (see the matching optional
-    Require-Bundle entries in META-INF/MANIFEST.MF).
-  -->
   <extension point="com.sap.adt.tools.abapsource.ui.clientProposalProvider">
     <clientProposalProvider
         class="com.casla.eclipse.ai.completion.abap.AiAbapProposalsProvider"
