@@ -10,13 +10,12 @@ public final class CompletionPromptBuilder {
         - METHOD (singular) ... ENDMETHOD implements a method inside a CLASS ... IMPLEMENTATION section; it is never used inside a DEFINITION section.
         - Never insert a METHOD/ENDMETHOD implementation while completing inside a DEFINITION section, and never insert a METHODS declaration while completing inside an IMPLEMENTATION section.
         - Every ABAP statement ends with a period; chained statements share one keyword, a colon, and comma-separated clauses.
-        - Complete only the current statement or declaration unless the surrounding code clearly continues into more lines.""";
+        - Complete only the current statement or declaration unless the surrounding code clearly continues into more lines.
+        - Learned examples are hints, not source-of-truth: adapt them to current scope and never invent missing identifiers.""";
 
     public record Prompt(String system, String user) {}
 
-    public Prompt build(CodeContext context) {
-        return new Prompt(buildSystem(context), buildUser(context));
-    }
+    public Prompt build(CodeContext context) { return new Prompt(buildSystem(context), buildUser(context)); }
 
     private String buildSystem(CodeContext context) {
         String roleDesc = switch (context.cursorContext()) {
@@ -25,7 +24,6 @@ public final class CompletionPromptBuilder {
             case STRING_LITERAL -> "You are an inline " + context.language() + " text completion engine.\nThe cursor is inside a string literal. Return only the string text to be inserted.";
             case CODE -> "You are an inline " + context.language() + " code completion engine.";
         };
-
         String base = """
             %s
             Return only the code or text that should be inserted directly at <CURSOR>.
@@ -33,16 +31,10 @@ public final class CompletionPromptBuilder {
             Do not repeat code before or after the cursor.
             Preserve indentation, naming style, nullability, and surrounding conventions.
             Use relevant context from related files when referencing types and methods.
-            Never write a natural-language sentence describing the code (for example "for `foo`, it starts by checking..."). If you cannot produce valid code, return nothing.""".formatted(roleDesc);
-        String rules = "ABAP".equals(context.language()) ? ABAP_RULES : "";
-        return (base + rules).strip();
+            Never write a natural-language sentence describing the code. If you cannot produce valid code, return nothing.""".formatted(roleDesc);
+        return (base + ("ABAP".equals(context.language()) ? ABAP_RULES : "")).strip();
     }
 
-    /**
-     * Omits empty fields instead of always rendering "Project:\nPackage:\n..."
-     * -- ADT does not expose project/package/imports the way JDT does, and a
-     * block of empty labels is pure noise the model has to read past.
-     */
     private String buildUser(CodeContext context) {
         StringBuilder user = new StringBuilder();
         user.append("Language: ").append(context.language()).append('\n');
@@ -51,15 +43,32 @@ public final class CompletionPromptBuilder {
         appendIfPresent(user, "Package", context.packageName());
         appendIfPresent(user, "Structure", context.structureHint());
 
-        String learnedStyle = AdaptiveLearningStore.get().promptHints(context);
+        AdaptiveLearningStore memory = AdaptiveLearningStore.get();
+        String learnedStyle = memory.promptHints(context);
         if (!learnedStyle.isBlank()) {
-            user.append("\nLearned coding preferences from this workspace:\n");
-            user.append(learnedStyle).append('\n');
+            user.append("\nLearned coding preferences from this workspace:\n").append(learnedStyle).append('\n');
         }
 
-        if (!context.imports().isBlank()) {
-            user.append("\nImports:\n").append(context.imports()).append('\n');
+        var examples = memory.acceptedExamples(context, 2);
+        if (!examples.isEmpty()) {
+            user.append("\nPreviously accepted patterns from this workspace (adapt, do not copy blindly):\n");
+            int i = 1;
+            for (var example : examples) {
+                user.append("--- accepted pattern ").append(i++).append(" ---\n");
+                user.append(example.snippet()).append("\n");
+            }
         }
+
+        var rememberedObjects = memory.relatedObjects(context, 3);
+        if (!rememberedObjects.isEmpty()) {
+            user.append("\nRemembered ABAP object skeletons:\n");
+            for (var object : rememberedObjects) {
+                user.append("--- ").append(object.objectKey()).append(" ---\n");
+                user.append(object.skeleton()).append("\n");
+            }
+        }
+
+        if (!context.imports().isBlank()) user.append("\nImports:\n").append(context.imports()).append('\n');
         if (context.relatedFiles() != null && !context.relatedFiles().isEmpty()) {
             user.append("\nRelated context:\n");
             for (var related : context.relatedFiles()) {
@@ -74,6 +83,6 @@ public final class CompletionPromptBuilder {
     }
 
     private static void appendIfPresent(StringBuilder builder, String label, String value) {
-        if (!value.isBlank()) builder.append(label).append(": ").append(value).append('\n');
+        if (value != null && !value.isBlank()) builder.append(label).append(": ").append(value).append('\n');
     }
 }

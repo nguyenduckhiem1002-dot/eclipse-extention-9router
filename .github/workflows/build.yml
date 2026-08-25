@@ -32,7 +32,21 @@ jobs:
           $tools = Join-Path $PWD '.tools'
           New-Item -ItemType Directory -Force $tools | Out-Null
           $url = 'https://www.eclipse.org/downloads/download.php?file=/technology/epp/downloads/release/2026-06/R/eclipse-java-2026-06-R-win32-x86_64.zip&r=1'
-          Invoke-WebRequest -Uri $url -OutFile $archive
+          $attempts = 4
+          for ($attempt = 1; $attempt -le $attempts; $attempt++) {
+            try {
+              if (Test-Path $archive) { Remove-Item $archive -Force }
+              Write-Host "Downloading Eclipse (attempt $attempt/$attempts)..."
+              Invoke-WebRequest -Uri $url -OutFile $archive -MaximumRetryCount 2 -RetryIntervalSec 3
+              if ((Get-Item $archive).Length -lt 10MB) { throw "Downloaded Eclipse archive is unexpectedly small." }
+              break
+            } catch {
+              if ($attempt -eq $attempts) { throw }
+              $delay = [Math]::Min(20, 3 * $attempt)
+              Write-Warning "Eclipse download failed: $($_.Exception.Message). Retrying in $delay seconds."
+              Start-Sleep -Seconds $delay
+            }
+          }
           Expand-Archive -Path $archive -DestinationPath $tools
 
       # This runner's Eclipse is the plain public download, so it never has
