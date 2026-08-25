@@ -42,7 +42,8 @@ public final class AdaptiveLearningTests {
         String source = """
             METHOD run.
               DATA lv_value TYPE string.
-              READ TABLE lt_items INTO DATA(ls_item) WITH KEY id = iv_id.
+              DATA ls_item TYPE zstr_item.
+              READ TABLE lt_items INTO ls_item WITH KEY id = iv_id.
               IF sy-subrc = 0.
                 lv_value = ls_item-name.
               ENDIF.
