@@ -7,6 +7,7 @@ import org.eclipse.ui.plugin.AbstractUIPlugin;
 import org.osgi.framework.BundleContext;
 
 import com.casla.eclipse.ai.completion.GhostTextController;
+import com.casla.eclipse.ai.learning.AdaptiveLearningController;
 import com.casla.eclipse.ai.runtime.AiRuntime;
 
 public final class AiPlugin extends AbstractUIPlugin {
@@ -26,11 +27,15 @@ public final class AiPlugin extends AbstractUIPlugin {
         // Ghost text replaces the old automatic Content Assist popup: the
         // popup stole focus and blocked typing while suggestions loaded,
         // which is exactly the jank inline suggestions are meant to avoid.
-        Display.getDefault().asyncExec(GhostTextController.get()::start);
+        Display.getDefault().asyncExec(() -> {
+            GhostTextController.get().start();
+            AdaptiveLearningController.get().start();
+        });
     }
 
     @Override
     public void stop(BundleContext context) throws Exception {
+        AdaptiveLearningController.get().stop();
         GhostTextController.get().stop();
         AiRuntime.get().shutdown();
         plugin = null;
