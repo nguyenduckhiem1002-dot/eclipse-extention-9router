@@ -97,6 +97,8 @@ $TestFiles = Get-ChildItem (Join-Path $ProjectRoot "tests") -Recurse -Filter "*.
 if ($LASTEXITCODE -ne 0) { throw "Test compilation failed." }
 & $Java -ea -cp "$TestClasses;$Classes;$EclipseRoot\plugins\*" com.casla.eclipse.ai.tests.CoreTests
 if ($LASTEXITCODE -ne 0) { throw "Core tests failed." }
+& $Java -ea -cp "$TestClasses;$Classes;$EclipseRoot\plugins\*" com.casla.eclipse.ai.tests.AdaptiveLearningTests
+if ($LASTEXITCODE -ne 0) { throw "Adaptive learning tests failed." }
 if (-not [string]::IsNullOrWhiteSpace($env:AI_CODE_ASSISTANT_API_KEY)) {
     & $Java -ea -cp "$TestClasses;$Classes;$EclipseRoot\plugins\*" com.casla.eclipse.ai.tests.LiveEndpointTest
     if ($LASTEXITCODE -ne 0) { throw "Live endpoint test failed." }
