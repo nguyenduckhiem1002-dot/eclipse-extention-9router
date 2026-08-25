@@ -1,5 +1,7 @@
 package com.casla.eclipse.ai.completion;
 
+import com.casla.eclipse.ai.learning.AdaptiveLearningStore;
+
 public final class CompletionPromptBuilder {
     private static final String ABAP_RULES = """
 
@@ -48,6 +50,13 @@ public final class CompletionPromptBuilder {
         appendIfPresent(user, "File", context.filePath());
         appendIfPresent(user, "Package", context.packageName());
         appendIfPresent(user, "Structure", context.structureHint());
+
+        String learnedStyle = AdaptiveLearningStore.get().promptHints(context);
+        if (!learnedStyle.isBlank()) {
+            user.append("\nLearned coding preferences from this workspace:\n");
+            user.append(learnedStyle).append('\n');
+        }
+
         if (!context.imports().isBlank()) {
             user.append("\nImports:\n").append(context.imports()).append('\n');
         }
