@@ -19,8 +19,9 @@ import com.casla.eclipse.ai.completion.RelatedFileCollector;
 
 /**
  * Watches the active editor and periodically learns from the stable document
- * state after typing settles. The heavy-ish regex analysis runs off the UI
- * thread and only aggregate metrics are persisted.
+ * state after typing settles. It also forwards raw document-change metadata
+ * to CompletionFeedbackTracker, which classifies completion acceptance while
+ * keeping completion text only in short-lived memory.
  */
 public final class AdaptiveLearningController implements IPartListener2, IDocumentListener {
     private static final AdaptiveLearningController INSTANCE = new AdaptiveLearningController();
@@ -84,6 +85,7 @@ public final class AdaptiveLearningController implements IPartListener2, IDocume
 
     @Override
     public void documentChanged(DocumentEvent event) {
+        CompletionFeedbackTracker.get().documentChanged(objectKey, language, event);
         scheduleLearning();
     }
 
@@ -107,6 +109,7 @@ public final class AdaptiveLearningController implements IPartListener2, IDocume
 
     private void detach() {
         ticket.incrementAndGet();
+        CompletionFeedbackTracker.get().dismissPending();
         if (document != null) document.removeDocumentListener(this);
         editor = null;
         document = null;

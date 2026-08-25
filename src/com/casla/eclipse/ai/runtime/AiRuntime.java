@@ -28,6 +28,7 @@ import com.casla.eclipse.ai.completion.CodeContext;
 import com.casla.eclipse.ai.completion.CompletionPromptBuilder;
 import com.casla.eclipse.ai.completion.CompletionSanitizer;
 import com.casla.eclipse.ai.completion.ValidationPipeline;
+import com.casla.eclipse.ai.learning.CompletionFeedbackTracker;
 import com.casla.eclipse.ai.preferences.AiPreferences;
 
 public final class AiRuntime {
@@ -231,6 +232,7 @@ public final class AiRuntime {
             ensureCurrent(requestGeneration);
             CompletionResponse sanitized = sanitizeOrThrow(response, context);
             markKnownGood(model);
+            CompletionFeedbackTracker.get().generated(context, sanitized);
             return sanitized;
         } catch (ApiException firstError) {
             if (activeModelPreference.mode() != ModelSelectionMode.AUTO
@@ -254,6 +256,7 @@ public final class AiRuntime {
                 ensureCurrent(requestGeneration);
                 CompletionResponse sanitized = sanitizeOrThrow(response, context);
                 markKnownGood(fallback);
+                CompletionFeedbackTracker.get().generated(context, sanitized);
                 return sanitized;
             } catch (ApiException secondError) {
                 updateRuntimeError(secondError);
@@ -282,6 +285,7 @@ public final class AiRuntime {
 
     public void shutdown() {
         generation.incrementAndGet();
+        CompletionFeedbackTracker.get().resetTransient();
         client.close();
     }
 
