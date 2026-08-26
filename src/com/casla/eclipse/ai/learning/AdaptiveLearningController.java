@@ -73,7 +73,7 @@ public final class AdaptiveLearningController implements IPartListener2, IDocume
 
     @Override
     public void documentAboutToBeChanged(DocumentEvent event) {
-        if (AdaptiveLearningStore.get().isNextEditEnabled()) {
+        if (AdaptiveLearningStore.get().shouldTrackNextEdits()) {
             EditHistoryTracker.get().documentAboutToBeChanged(objectKey, language, document, event);
         }
     }
@@ -81,7 +81,7 @@ public final class AdaptiveLearningController implements IPartListener2, IDocume
     @Override
     public void documentChanged(DocumentEvent event) {
         boolean aiMutation = CompletionFeedbackTracker.get().documentChanged(objectKey, language, event);
-        if (AdaptiveLearningStore.get().isNextEditEnabled()) {
+        if (AdaptiveLearningStore.get().shouldTrackNextEdits()) {
             EditHistoryTracker.get().documentChanged(objectKey, language, document, event, aiMutation);
         }
         scheduleLearning();
@@ -119,7 +119,7 @@ public final class AdaptiveLearningController implements IPartListener2, IDocume
     }
 
     private void showNextEditSuggestion(EditHistoryTracker.NextEditSuggestion suggestion) {
-        if (!AdaptiveLearningStore.get().isNextEditEnabled()) return;
+        if (!AdaptiveLearningStore.get().shouldTrackNextEdits()) return;
         ITextEditor activeEditor = editor;
         if (activeEditor == null || suggestion == null) return;
         Display.getDefault().asyncExec(() -> {
