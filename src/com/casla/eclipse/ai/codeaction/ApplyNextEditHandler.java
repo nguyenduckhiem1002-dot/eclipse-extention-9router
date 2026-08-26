@@ -11,6 +11,7 @@ import org.eclipse.ui.handlers.HandlerUtil;
 import org.eclipse.ui.texteditor.ITextEditor;
 
 import com.casla.eclipse.ai.AiPlugin;
+import com.casla.eclipse.ai.learning.AdaptiveLearningStore;
 import com.casla.eclipse.ai.learning.EditHistoryTracker;
 
 /** Applies the current same-file repeated-edit suggestion after confirmation. */
@@ -22,6 +23,10 @@ public final class ApplyNextEditHandler extends AbstractHandler {
         if (editor == null || editor.getDocumentProvider() == null) return null;
         IDocument document = editor.getDocumentProvider().getDocument(editor.getEditorInput());
         if (document == null) return null;
+        if (!AdaptiveLearningStore.get().shouldTrackNextEdits()) {
+            MessageDialog.openInformation(editor.getSite().getShell(), "AI Next Edit", "AI Next Edit is disabled or adaptive learning is paused. Enable it in AI Code Assistant → Adaptive Learning.");
+            return null;
+        }
 
         EditHistoryTracker tracker = EditHistoryTracker.get();
         EditHistoryTracker.NextEditSuggestion suggestion = tracker.suggestion();
