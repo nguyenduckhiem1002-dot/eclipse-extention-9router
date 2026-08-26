@@ -22,12 +22,19 @@
         id="com.casla.eclipse.ai.commands.fixSelection"
         name="Fix Selection with AI"
         description="Repair the selected ABAP code (or current line) with AI and preview before applying"/>
+    <command
+        id="com.casla.eclipse.ai.commands.applyNextEdit"
+        name="Apply AI Next Edit"
+        description="Apply a high-confidence repeated manual edit detected in the current ABAP file"/>
   </extension>
 
   <extension point="org.eclipse.ui.handlers">
     <handler
         commandId="com.casla.eclipse.ai.commands.fixSelection"
         class="com.casla.eclipse.ai.codeaction.AiFixSelectionHandler"/>
+    <handler
+        commandId="com.casla.eclipse.ai.commands.applyNextEdit"
+        class="com.casla.eclipse.ai.codeaction.ApplyNextEditHandler"/>
   </extension>
 
   <extension point="org.eclipse.ui.bindings">
@@ -35,6 +42,10 @@
         commandId="com.casla.eclipse.ai.commands.fixSelection"
         schemeId="org.eclipse.ui.defaultAcceleratorConfiguration"
         sequence="M1+M3+F"/>
+    <key
+        commandId="com.casla.eclipse.ai.commands.applyNextEdit"
+        schemeId="org.eclipse.ui.defaultAcceleratorConfiguration"
+        sequence="M1+M3+N"/>
   </extension>
 
   <extension
