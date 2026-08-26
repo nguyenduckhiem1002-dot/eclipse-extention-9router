@@ -28,6 +28,7 @@ public final class AdaptiveLearningStore {
     private final ObservedAbapObjectIndex objectIndex = new ObservedAbapObjectIndex();
     private boolean loaded;
     private boolean paused;
+    private boolean nextEditEnabled = true;
 
     private AdaptiveLearningStore() {}
     public static AdaptiveLearningStore get() { return INSTANCE; }
@@ -59,9 +60,7 @@ public final class AdaptiveLearningStore {
         save();
     }
 
-    public synchronized void recordFeedback(String model, FeedbackEvent event) {
-        recordFeedback(model, "", event);
-    }
+    public synchronized void recordFeedback(String model, FeedbackEvent event) { recordFeedback(model, "", event); }
 
     public synchronized void rememberAcceptedExample(String objectKey, String structureHint, String completion, String model) {
         rememberAcceptedExample(objectKey, structureHint, "unknown", "", completion, model);
@@ -102,6 +101,13 @@ public final class AdaptiveLearningStore {
     public synchronized int objectCount() { ensureLoaded(); return objectIndex.size(); }
     public synchronized boolean isPaused() { ensureLoaded(); return paused; }
     public synchronized void setPaused(boolean value) { ensureLoaded(); paused = value; save(); }
+    public synchronized boolean isNextEditEnabled() { ensureLoaded(); return nextEditEnabled && !paused; }
+    public synchronized void setNextEditEnabled(boolean value) {
+        ensureLoaded();
+        nextEditEnabled = value;
+        if (!value) EditHistoryTracker.get().resetTransient();
+        save();
+    }
     public synchronized void setMemoryLimit(int value) { ensureLoaded(); acceptedExamples.setMaxExamples(value); objectIndex.setMaxObjects(value); save(); }
 
     public synchronized CompletionFeedbackStats feedbackSnapshot() { ensureLoaded(); return copy(totalFeedback); }
@@ -120,6 +126,7 @@ public final class AdaptiveLearningStore {
         ensureLoaded();
         CompletionFeedbackStats stats = totalFeedback;
         return "Adaptive learning: " + (paused ? "paused" : "active")
+            + " | next-edit=" + (nextEditEnabled ? "on" : "off")
             + " | observations=" + styleProfile.observations()
             + " | examples=" + acceptedExamples.size()
             + " | objects=" + objectIndex.size()
@@ -142,6 +149,7 @@ public final class AdaptiveLearningStore {
         objectIndex.reset();
         lastDocumentHashes.clear();
         CompletionFeedbackTracker.get().resetTransient();
+        EditHistoryTracker.get().resetTransient();
         save();
     }
 
@@ -156,6 +164,7 @@ public final class AdaptiveLearningStore {
             styleProfile.load(properties);
             totalFeedback.load(properties, "feedback.total.");
             paused = Boolean.parseBoolean(properties.getProperty("learning.paused", "false"));
+            nextEditEnabled = Boolean.parseBoolean(properties.getProperty("learning.nextEditEnabled", "true"));
             acceptedExamples.load(properties);
             objectIndex.load(properties);
             for (String model : decodeModelIndex(properties.getProperty("feedback.models", ""))) {
@@ -180,6 +189,7 @@ public final class AdaptiveLearningStore {
         styleProfile.store(properties);
         totalFeedback.store(properties, "feedback.total.");
         properties.setProperty("learning.paused", Boolean.toString(paused));
+        properties.setProperty("learning.nextEditEnabled", Boolean.toString(nextEditEnabled));
         acceptedExamples.store(properties);
         objectIndex.store(properties);
         properties.setProperty("feedback.models", encodeModelIndex(feedbackByModel.keySet()));
