@@ -23,8 +23,13 @@ public final class ProjectStyleProfile {
     );
     private static final Pattern PREFIXED_LOCAL = Pattern.compile("(?i)\\b(?:lv|lt|ls|lo|lr|lf|iv|it|is|ev|et|es)_[a-z0-9_]+\\b");
     private static final Pattern KEYWORD = Pattern.compile(
-        "(?i)\\b(?:DATA|IF|ELSEIF|ELSE|ENDIF|LOOP|ENDLOOP|SELECT|ENDSELECT|METHOD|ENDMETHOD|READ|TABLE|VALUE|RETURNING|IMPORTING|EXPORTING|CHANGING)\\b"
+        "(?i)\\b(?:DATA|IF|ELSEIF|ELSE|ENDIF|LOOP|ENDLOOP|SELECT|ENDSELECT|METHOD|ENDMETHOD|READ|TABLE|VALUE|RETURNING|IMPORTING|EXPORTING|CHANGING|RECEIVING)\\b"
     );
+    private static final Pattern METHOD_CALL = Pattern.compile("(?i)(?:->|=>)\\s*[a-z0-9_]+\\s*\\(");
+    private static final Pattern MULTILINE_METHOD_CALL = Pattern.compile("(?im)(?:->|=>)\\s*[a-z0-9_]+\\s*\\([ \\t]*$");
+    private static final Pattern PARAMETER_SECTION_LINE = Pattern.compile("(?im)^[ \\t]*(?:EXPORTING|IMPORTING|CHANGING|RECEIVING)[ \\t]*$");
+    private static final Pattern PARAMETER_SECTION_INLINE = Pattern.compile("(?i)\\b(?:EXPORTING|IMPORTING|CHANGING|RECEIVING)[ \\t]+[a-z0-9_]+[ \\t]*=");
+    private static final Pattern CLOSING_PAREN_OWN_LINE = Pattern.compile("(?m)^[ \\t]*\\)\\.[ \\t]*$");
 
     private int observations;
     private double inlineDeclaration;
@@ -32,6 +37,9 @@ public final class ProjectStyleProfile {
     private double modernSyntax;
     private double uppercaseKeywords;
     private double prefixedNaming;
+    private double multilineMethodCalls;
+    private double parameterSectionsOnOwnLine;
+    private double closingParenOwnLine;
 
     public synchronized void observeAbap(String source) {
         if (source == null || source.isBlank()) return;
@@ -78,6 +86,30 @@ public final class ProjectStyleProfile {
             hadSignal = true;
         }
 
+        int methodCalls = count(METHOD_CALL, source);
+        if (methodCalls > 0) {
+            int multiline = count(MULTILINE_METHOD_CALL, source);
+            multilineMethodCalls = ema(multilineMethodCalls, ratio(multiline, methodCalls), observations > 0);
+
+            int standaloneSections = count(PARAMETER_SECTION_LINE, source);
+            int inlineSections = count(PARAMETER_SECTION_INLINE, source);
+            if (standaloneSections + inlineSections > 0) {
+                parameterSectionsOnOwnLine = ema(
+                    parameterSectionsOnOwnLine,
+                    ratio(standaloneSections, standaloneSections + inlineSections),
+                    observations > 0
+                );
+            }
+
+            int closingOwnLine = count(CLOSING_PAREN_OWN_LINE, source);
+            closingParenOwnLine = ema(
+                closingParenOwnLine,
+                Math.min(1.0d, ratio(closingOwnLine, methodCalls)),
+                observations > 0
+            );
+            hadSignal = true;
+        }
+
         if (hadSignal) observations++;
     }
 
@@ -111,12 +143,22 @@ public final class ProjectStyleProfile {
             hints.add("Preserve the observed lv_/lt_/ls_/lo_/iv_/it_ style prefixes for identifiers.");
         }
 
+        if (multilineMethodCalls >= 0.58d) {
+            hints.add("Prefer multi-line method calls when a call has multiple named parameters or parameter sections.");
+        } else if (multilineMethodCalls <= 0.20d) {
+            hints.add("Keep short method calls compact when they fit naturally on one line.");
+        }
+        if (parameterSectionsOnOwnLine >= 0.60d) {
+            hints.add("Put EXPORTING, IMPORTING, CHANGING and RECEIVING on their own lines, with named parameters indented below the section.");
+        }
+        if (closingParenOwnLine >= 0.58d) {
+            hints.add("For multi-line calls, keep the closing ). on its own line.");
+        }
+
         return String.join("\n", hints);
     }
 
-    public synchronized int observations() {
-        return observations;
-    }
+    public synchronized int observations() { return observations; }
 
     public synchronized void reset() {
         observations = 0;
@@ -125,6 +167,9 @@ public final class ProjectStyleProfile {
         modernSyntax = 0;
         uppercaseKeywords = 0;
         prefixedNaming = 0;
+        multilineMethodCalls = 0;
+        parameterSectionsOnOwnLine = 0;
+        closingParenOwnLine = 0;
     }
 
     public synchronized void load(Properties properties) {
@@ -134,6 +179,9 @@ public final class ProjectStyleProfile {
         modernSyntax = decimal(properties, "modernSyntax", 0);
         uppercaseKeywords = decimal(properties, "uppercaseKeywords", 0);
         prefixedNaming = decimal(properties, "prefixedNaming", 0);
+        multilineMethodCalls = decimal(properties, "multilineMethodCalls", 0);
+        parameterSectionsOnOwnLine = decimal(properties, "parameterSectionsOnOwnLine", 0);
+        closingParenOwnLine = decimal(properties, "closingParenOwnLine", 0);
     }
 
     public synchronized void store(Properties properties) {
@@ -143,6 +191,9 @@ public final class ProjectStyleProfile {
         properties.setProperty("modernSyntax", Double.toString(modernSyntax));
         properties.setProperty("uppercaseKeywords", Double.toString(uppercaseKeywords));
         properties.setProperty("prefixedNaming", Double.toString(prefixedNaming));
+        properties.setProperty("multilineMethodCalls", Double.toString(multilineMethodCalls));
+        properties.setProperty("parameterSectionsOnOwnLine", Double.toString(parameterSectionsOnOwnLine));
+        properties.setProperty("closingParenOwnLine", Double.toString(closingParenOwnLine));
     }
 
     private static int count(Pattern pattern, String source) {
@@ -161,11 +212,8 @@ public final class ProjectStyleProfile {
     }
 
     private static int integer(Properties properties, String key, int fallback) {
-        try {
-            return Integer.parseInt(properties.getProperty(key, Integer.toString(fallback)));
-        } catch (NumberFormatException ignored) {
-            return fallback;
-        }
+        try { return Integer.parseInt(properties.getProperty(key, Integer.toString(fallback))); }
+        catch (NumberFormatException ignored) { return fallback; }
     }
 
     private static double decimal(Properties properties, String key, double fallback) {

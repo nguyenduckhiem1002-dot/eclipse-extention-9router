@@ -18,10 +18,9 @@ import org.eclipse.ui.texteditor.ITextEditor;
 import com.casla.eclipse.ai.completion.RelatedFileCollector;
 
 /**
- * Watches the active editor and periodically learns from the stable document
- * state after typing settles. It also forwards raw document-change metadata
- * to CompletionFeedbackTracker, which classifies completion acceptance while
- * keeping completion text only in short-lived memory.
+ * Watches the active editor and periodically learns from stable ABAP source.
+ * Completion-origin edits go to CompletionFeedbackTracker; manual edits can
+ * also feed the conservative same-file EditHistoryTracker when enabled.
  */
 public final class AdaptiveLearningController implements IPartListener2, IDocumentListener {
     private static final AdaptiveLearningController INSTANCE = new AdaptiveLearningController();
@@ -41,10 +40,7 @@ public final class AdaptiveLearningController implements IPartListener2, IDocume
     private String language = "Text";
 
     private AdaptiveLearningController() {}
-
-    public static AdaptiveLearningController get() {
-        return INSTANCE;
-    }
+    public static AdaptiveLearningController get() { return INSTANCE; }
 
     public void start() {
         if (!PlatformUI.isWorkbenchRunning()) return;
@@ -67,12 +63,7 @@ public final class AdaptiveLearningController implements IPartListener2, IDocume
     public void partActivated(IWorkbenchPartReference partRef) {
         if (partRef.getPart(false) instanceof IEditorPart activeEditor) attach(activeEditor);
     }
-
-    @Override
-    public void partClosed(IWorkbenchPartReference partRef) {
-        if (partRef.getPart(false) == editor) detach();
-    }
-
+    @Override public void partClosed(IWorkbenchPartReference partRef) { if (partRef.getPart(false) == editor) detach(); }
     @Override public void partBroughtToTop(IWorkbenchPartReference partRef) {}
     @Override public void partDeactivated(IWorkbenchPartReference partRef) {}
     @Override public void partOpened(IWorkbenchPartReference partRef) {}
@@ -81,11 +72,18 @@ public final class AdaptiveLearningController implements IPartListener2, IDocume
     @Override public void partInputChanged(IWorkbenchPartReference partRef) {}
 
     @Override
-    public void documentAboutToBeChanged(DocumentEvent event) {}
+    public void documentAboutToBeChanged(DocumentEvent event) {
+        if (AdaptiveLearningStore.get().shouldTrackNextEdits()) {
+            EditHistoryTracker.get().documentAboutToBeChanged(objectKey, language, document, event);
+        }
+    }
 
     @Override
     public void documentChanged(DocumentEvent event) {
-        CompletionFeedbackTracker.get().documentChanged(objectKey, language, event);
+        boolean aiMutation = CompletionFeedbackTracker.get().documentChanged(objectKey, language, event);
+        if (AdaptiveLearningStore.get().shouldTrackNextEdits()) {
+            EditHistoryTracker.get().documentChanged(objectKey, language, document, event, aiMutation);
+        }
         scheduleLearning();
     }
 
@@ -103,6 +101,7 @@ public final class AdaptiveLearningController implements IPartListener2, IDocume
         objectKey = textEditor.getEditorInput() == null ? "" : textEditor.getEditorInput().getName();
         language = RelatedFileCollector.isAbapEditor(textEditor, objectKey) ? "ABAP" : "Text";
         document.addDocumentListener(this);
+        EditHistoryTracker.get().setSuggestionListener(this::showNextEditSuggestion);
 
         if ("ABAP".equals(language)) scheduleLearning();
     }
@@ -110,11 +109,27 @@ public final class AdaptiveLearningController implements IPartListener2, IDocume
     private void detach() {
         ticket.incrementAndGet();
         CompletionFeedbackTracker.get().dismissPending();
+        EditHistoryTracker.get().setSuggestionListener(null);
+        EditHistoryTracker.get().resetTransient();
         if (document != null) document.removeDocumentListener(this);
         editor = null;
         document = null;
         objectKey = "";
         language = "Text";
+    }
+
+    private void showNextEditSuggestion(EditHistoryTracker.NextEditSuggestion suggestion) {
+        if (!AdaptiveLearningStore.get().shouldTrackNextEdits()) return;
+        ITextEditor activeEditor = editor;
+        if (activeEditor == null || suggestion == null) return;
+        Display.getDefault().asyncExec(() -> {
+            if (editor != activeEditor || editor == null || editor.getEditorSite() == null) return;
+            String before = compact(suggestion.before());
+            String after = compact(suggestion.replacement());
+            editor.getEditorSite().getActionBars().getStatusLineManager().setMessage(
+                "AI next edit: " + before + " → " + after + "  (Ctrl+Alt+N to apply)"
+            );
+        });
     }
 
     private void scheduleLearning() {
@@ -129,5 +144,11 @@ public final class AdaptiveLearningController implements IPartListener2, IDocume
         String key = objectKey;
         String currentLanguage = language;
         executor.execute(() -> AdaptiveLearningStore.get().observeDocument(key, currentLanguage, source));
+    }
+
+    private static String compact(String value) {
+        if (value == null) return "";
+        String result = value.replace('\n', ' ').strip();
+        return result.length() <= 50 ? result : result.substring(0, 47) + "…";
     }
 }

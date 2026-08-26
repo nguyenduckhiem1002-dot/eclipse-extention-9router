@@ -28,6 +28,7 @@ import com.casla.eclipse.ai.completion.CodeContext;
 import com.casla.eclipse.ai.completion.CompletionPromptBuilder;
 import com.casla.eclipse.ai.completion.CompletionSanitizer;
 import com.casla.eclipse.ai.completion.ValidationPipeline;
+import com.casla.eclipse.ai.completion.abap.AbapCompletionQualityGate;
 import com.casla.eclipse.ai.learning.CompletionFeedbackTracker;
 import com.casla.eclipse.ai.preferences.AiPreferences;
 
@@ -191,6 +192,40 @@ public final class AiRuntime {
         }
     }
 
+    /** Runs explicit fix/refactor prompts without registering them as inline completions. */
+    public CompletionResponse completeCodeAction(
+        CodeContext context,
+        String systemPrompt,
+        String userPrompt,
+        IProgressMonitor monitor
+    ) throws ApiException, OperationCanceledException {
+        RuntimeSnapshot state = snapshot.get();
+        if (!state.canComplete()) throw new ApiException(0, "NOT_READY", "AI connection or model is not ready.");
+        long requestGeneration = generation.get();
+        CompletionSettings settings = preferences.completionSettings();
+        String model = chooseModelForContext(state.resolvedModelId(), context, Set.of());
+
+        try {
+            CompletionResponse response = client.complete(activeConnection, model, systemPrompt, userPrompt, settings, monitor, false);
+            ensureCurrent(requestGeneration);
+            CompletionResponse sanitized = withSelectedModel(sanitizeCodeActionOrThrow(response, context), model);
+            markKnownGood(model);
+            return sanitized;
+        } catch (ApiException firstError) {
+            if (activeModelPreference.mode() != ModelSelectionMode.AUTO || !firstError.isModelResolutionError()) {
+                updateRuntimeError(firstError);
+                throw firstError;
+            }
+            String fallback = chooseModelForContext(state.resolvedModelId(), context, Set.of(model));
+            if (fallback.isBlank()) throw firstError;
+            CompletionResponse response = client.complete(activeConnection, fallback, systemPrompt, userPrompt, settings, monitor, false);
+            ensureCurrent(requestGeneration);
+            CompletionResponse sanitized = withSelectedModel(sanitizeCodeActionOrThrow(response, context), fallback);
+            markKnownGood(fallback);
+            return sanitized;
+        }
+    }
+
     private String chooseModelForContext(String fallback, CodeContext context, Set<String> excluded) {
         if (activeModelPreference.mode() == ModelSelectionMode.MANUAL || catalog.isEmpty()) return excluded.contains(fallback) ? "" : fallback;
         return adaptiveRouter.resolve(catalog, activeModelPreference.lastKnownGoodModel(), excluded, context).orElse(fallback);
@@ -198,8 +233,38 @@ public final class AiRuntime {
 
     private CompletionResponse sanitizeOrThrow(CompletionResponse response, CodeContext context) throws ApiException {
         String insertion = new CompletionSanitizer().sanitize(response.content(), context);
+        insertion = AbapCompletionQualityGate.refine(insertion, context);
+        return validatedResponse(response, context, insertion);
+    }
+
+    private CompletionResponse sanitizeCodeActionOrThrow(CompletionResponse response, CodeContext context) throws ApiException {
+        // Replacement code must not be passed through inline echo trimming:
+        // a valid fix may legitimately start/end with source that also appears
+        // outside the target. Give CompletionSanitizer an empty cursor window,
+        // then reuse ABAP lexical and structural safety gates.
+        CodeContext isolated = new CodeContext(
+            context.projectName(),
+            context.filePath(),
+            context.language(),
+            context.packageName(),
+            context.imports(),
+            context.structureHint(),
+            "",
+            "",
+            0,
+            context.modificationStamp(),
+            "code-action",
+            context.cursorContext(),
+            context.relatedFiles()
+        );
+        String insertion = new CompletionSanitizer().sanitize(response.content(), isolated);
+        insertion = AbapCompletionQualityGate.refine(insertion, context);
+        return validatedResponse(response, context, insertion);
+    }
+
+    private CompletionResponse validatedResponse(CompletionResponse response, CodeContext context, String insertion) throws ApiException {
         if (insertion.isBlank() || ValidationPipeline.isUnsafe(insertion, context.structureHint())) {
-            throw new ApiException(200, "EMPTY_COMPLETION", "The model returned an empty completion.");
+            throw new ApiException(200, "EMPTY_COMPLETION", "The model returned an empty or unsafe completion.");
         }
         return new CompletionResponse(insertion, response.responseModel(), response.requestId(), response.promptTokens(), response.completionTokens());
     }

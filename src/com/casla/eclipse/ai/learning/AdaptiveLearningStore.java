@@ -28,6 +28,7 @@ public final class AdaptiveLearningStore {
     private final ObservedAbapObjectIndex objectIndex = new ObservedAbapObjectIndex();
     private boolean loaded;
     private boolean paused;
+    private boolean nextEditEnabled = true;
 
     private AdaptiveLearningStore() {}
     public static AdaptiveLearningStore get() { return INSTANCE; }
@@ -59,14 +60,23 @@ public final class AdaptiveLearningStore {
         save();
     }
 
-    public synchronized void recordFeedback(String model, FeedbackEvent event) {
-        recordFeedback(model, "", event);
-    }
+    public synchronized void recordFeedback(String model, FeedbackEvent event) { recordFeedback(model, "", event); }
 
     public synchronized void rememberAcceptedExample(String objectKey, String structureHint, String completion, String model) {
+        rememberAcceptedExample(objectKey, structureHint, "unknown", "", completion, model);
+    }
+
+    public synchronized void rememberAcceptedExample(
+        String objectKey,
+        String structureHint,
+        String contextBucket,
+        String contextShape,
+        String completion,
+        String model
+    ) {
         ensureLoaded();
         if (paused) return;
-        acceptedExamples.remember(objectKey, structureHint, completion, model);
+        acceptedExamples.remember(objectKey, structureHint, contextBucket, contextShape, completion, model);
         save();
     }
 
@@ -91,6 +101,11 @@ public final class AdaptiveLearningStore {
     public synchronized int objectCount() { ensureLoaded(); return objectIndex.size(); }
     public synchronized boolean isPaused() { ensureLoaded(); return paused; }
     public synchronized void setPaused(boolean value) { ensureLoaded(); paused = value; save(); }
+    /** Persisted preference shown in the UI, independent of the global pause flag. */
+    public synchronized boolean isNextEditEnabled() { ensureLoaded(); return nextEditEnabled; }
+    /** Runtime gate: Next Edit is inactive whenever all adaptive learning is paused. */
+    public synchronized boolean shouldTrackNextEdits() { ensureLoaded(); return nextEditEnabled && !paused; }
+    public synchronized void setNextEditEnabled(boolean value) { ensureLoaded(); nextEditEnabled = value; save(); }
     public synchronized void setMemoryLimit(int value) { ensureLoaded(); acceptedExamples.setMaxExamples(value); objectIndex.setMaxObjects(value); save(); }
 
     public synchronized CompletionFeedbackStats feedbackSnapshot() { ensureLoaded(); return copy(totalFeedback); }
@@ -109,6 +124,7 @@ public final class AdaptiveLearningStore {
         ensureLoaded();
         CompletionFeedbackStats stats = totalFeedback;
         return "Adaptive learning: " + (paused ? "paused" : "active")
+            + " | next-edit=" + (nextEditEnabled ? "on" : "off")
             + " | observations=" + styleProfile.observations()
             + " | examples=" + acceptedExamples.size()
             + " | objects=" + objectIndex.size()
@@ -119,8 +135,9 @@ public final class AdaptiveLearningStore {
 
     public synchronized void resetExamples() { ensureLoaded(); acceptedExamples.reset(); save(); }
     public synchronized void resetObjects() { ensureLoaded(); objectIndex.reset(); save(); }
-    public synchronized void resetFeedback() { ensureLoaded(); totalFeedback.reset(); feedbackByModel.clear(); feedbackByModelContext.clear(); CompletionFeedbackTracker.get().resetTransient(); save(); }
+    public synchronized void resetFeedback() { ensureLoaded(); totalFeedback.reset(); feedbackByModel.clear(); feedbackByModelContext.clear(); save(); }
 
+    /** Resets only persisted/aggregate state. UI/transient trackers reset separately to avoid lock-order inversion. */
     public synchronized void reset() {
         ensureLoaded();
         styleProfile.reset();
@@ -130,7 +147,6 @@ public final class AdaptiveLearningStore {
         acceptedExamples.reset();
         objectIndex.reset();
         lastDocumentHashes.clear();
-        CompletionFeedbackTracker.get().resetTransient();
         save();
     }
 
@@ -145,6 +161,7 @@ public final class AdaptiveLearningStore {
             styleProfile.load(properties);
             totalFeedback.load(properties, "feedback.total.");
             paused = Boolean.parseBoolean(properties.getProperty("learning.paused", "false"));
+            nextEditEnabled = Boolean.parseBoolean(properties.getProperty("learning.nextEditEnabled", "true"));
             acceptedExamples.load(properties);
             objectIndex.load(properties);
             for (String model : decodeModelIndex(properties.getProperty("feedback.models", ""))) {
@@ -169,6 +186,7 @@ public final class AdaptiveLearningStore {
         styleProfile.store(properties);
         totalFeedback.store(properties, "feedback.total.");
         properties.setProperty("learning.paused", Boolean.toString(paused));
+        properties.setProperty("learning.nextEditEnabled", Boolean.toString(nextEditEnabled));
         acceptedExamples.store(properties);
         objectIndex.store(properties);
         properties.setProperty("feedback.models", encodeModelIndex(feedbackByModel.keySet()));
@@ -199,19 +217,29 @@ public final class AdaptiveLearningStore {
     }
 
     private static CompletionFeedbackStats copy(CompletionFeedbackStats source) {
-        Properties p = new Properties(); source.store(p, "copy."); CompletionFeedbackStats result = new CompletionFeedbackStats(); result.load(p, "copy."); return result;
+        Properties p = new Properties();
+        source.store(p, "copy.");
+        CompletionFeedbackStats result = new CompletionFeedbackStats();
+        result.load(p, "copy.");
+        return result;
     }
     private static String encode(String value) { return Base64.getUrlEncoder().withoutPadding().encodeToString(clean(value).getBytes(StandardCharsets.UTF_8)); }
     private static String encodeModelIndex(Iterable<String> values) { StringBuilder b = new StringBuilder(); for (String value : values) { if (b.length() > 0) b.append(','); b.append(encode(value)); } return b.toString(); }
     private static java.util.List<String> decodeModelIndex(String value) {
         if (value == null || value.isBlank()) return java.util.List.of();
         java.util.List<String> result = new java.util.ArrayList<>();
-        for (String encoded : value.split(",")) { if (encoded.isBlank()) continue; try { result.add(new String(Base64.getUrlDecoder().decode(encoded), StandardCharsets.UTF_8)); } catch (IllegalArgumentException ignored) {} }
+        for (String encoded : value.split(",")) {
+            if (encoded.isBlank()) continue;
+            try { result.add(new String(Base64.getUrlDecoder().decode(encoded), StandardCharsets.UTF_8)); }
+            catch (IllegalArgumentException ignored) {}
+        }
         return result;
     }
     private static String clean(String value) { return value == null ? "" : value.trim(); }
     private static Path storagePath() {
-        AiPlugin plugin = AiPlugin.getDefault(); if (plugin == null) return null;
-        try { return plugin.getStateLocation().append("adaptive-learning.properties").toFile().toPath(); } catch (RuntimeException unavailable) { return null; }
+        AiPlugin plugin = AiPlugin.getDefault();
+        if (plugin == null) return null;
+        try { return plugin.getStateLocation().append("adaptive-learning.properties").toFile().toPath(); }
+        catch (RuntimeException unavailable) { return null; }
     }
 }

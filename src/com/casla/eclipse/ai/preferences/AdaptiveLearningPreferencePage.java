@@ -14,10 +14,13 @@ import org.eclipse.ui.IWorkbench;
 import org.eclipse.ui.IWorkbenchPreferencePage;
 
 import com.casla.eclipse.ai.learning.AdaptiveLearningStore;
+import com.casla.eclipse.ai.learning.CompletionFeedbackTracker;
+import com.casla.eclipse.ai.learning.EditHistoryTracker;
 
 /** Controls for local adaptive memory; no telemetry leaves the workstation. */
 public final class AdaptiveLearningPreferencePage extends PreferencePage implements IWorkbenchPreferencePage {
     private Button enabled;
+    private Button nextEditEnabled;
     private Spinner memoryLimit;
     private Label diagnostics;
 
@@ -38,6 +41,11 @@ public final class AdaptiveLearningPreferencePage extends PreferencePage impleme
         enabled.setText("Enable local adaptive learning");
         enabled.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 2, 1));
 
+        nextEditEnabled = new Button(controls, SWT.CHECK);
+        nextEditEnabled.setText("Detect repeated manual edits (AI Next Edit)");
+        nextEditEnabled.setToolTipText("After two recent same-file manual replacements match, suggest the next occurrence. AI-generated edits are excluded.");
+        nextEditEnabled.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 2, 1));
+
         new Label(controls, SWT.NONE).setText("Maximum local examples / objects");
         memoryLimit = new Spinner(controls, SWT.BORDER);
         memoryLimit.setMinimum(20);
@@ -47,17 +55,24 @@ public final class AdaptiveLearningPreferencePage extends PreferencePage impleme
         memoryLimit.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
 
         Label privacy = new Label(controls, SWT.WRAP);
-        privacy.setText("Memory is stored only in Eclipse plugin state. Accepted examples are normalized and bounded; object memory stores skeletons rather than full documents. No learning telemetry is uploaded.");
+        privacy.setText("Memory is stored only in Eclipse plugin state. Accepted examples are normalized and bounded; object memory stores skeletons rather than full documents. Next Edit keeps only a short-lived in-memory manual edit history. No learning telemetry is uploaded.");
         privacy.setLayoutData(new GridData(SWT.FILL, SWT.TOP, true, false, 2, 1));
 
         Group actions = new Group(root, SWT.NONE);
         actions.setText("Reset");
         actions.setLayout(new GridLayout(4, true));
         actions.setLayoutData(new GridData(SWT.FILL, SWT.TOP, true, false));
-        button(actions, "Reset all", () -> AdaptiveLearningStore.get().reset());
+        button(actions, "Reset all", () -> {
+            AdaptiveLearningStore.get().reset();
+            CompletionFeedbackTracker.get().resetTransient();
+            EditHistoryTracker.get().resetTransient();
+        });
         button(actions, "Examples", () -> AdaptiveLearningStore.get().resetExamples());
         button(actions, "Objects", () -> AdaptiveLearningStore.get().resetObjects());
-        button(actions, "Feedback", () -> AdaptiveLearningStore.get().resetFeedback());
+        button(actions, "Feedback", () -> {
+            AdaptiveLearningStore.get().resetFeedback();
+            CompletionFeedbackTracker.get().resetTransient();
+        });
 
         Group diag = new Group(root, SWT.NONE);
         diag.setText("Diagnostics");
@@ -83,6 +98,7 @@ public final class AdaptiveLearningPreferencePage extends PreferencePage impleme
     private void load() {
         AdaptiveLearningStore store = AdaptiveLearningStore.get();
         enabled.setSelection(!store.isPaused());
+        nextEditEnabled.setSelection(store.isNextEditEnabled());
         refreshDiagnostics();
     }
 
@@ -94,13 +110,17 @@ public final class AdaptiveLearningPreferencePage extends PreferencePage impleme
     public boolean performOk() {
         AdaptiveLearningStore store = AdaptiveLearningStore.get();
         store.setMemoryLimit(memoryLimit.getSelection());
+        boolean nextEditChanged = store.isNextEditEnabled() != nextEditEnabled.getSelection();
+        store.setNextEditEnabled(nextEditEnabled.getSelection());
         store.setPaused(!enabled.getSelection());
+        if (nextEditChanged && !nextEditEnabled.getSelection()) EditHistoryTracker.get().resetTransient();
         return true;
     }
 
     @Override
     protected void performDefaults() {
         enabled.setSelection(true);
+        nextEditEnabled.setSelection(true);
         memoryLimit.setSelection(300);
         super.performDefaults();
     }
