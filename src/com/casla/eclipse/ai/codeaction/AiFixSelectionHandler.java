@@ -3,6 +3,9 @@ package com.casla.eclipse.ai.codeaction;
 import org.eclipse.core.commands.AbstractHandler;
 import org.eclipse.core.commands.ExecutionEvent;
 import org.eclipse.core.commands.ExecutionException;
+import org.eclipse.core.resources.IFile;
+import org.eclipse.core.resources.IMarker;
+import org.eclipse.core.resources.IResource;
 import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.core.runtime.IStatus;
 import org.eclipse.core.runtime.Status;
@@ -56,15 +59,16 @@ public final class AiFixSelectionHandler extends AbstractHandler {
             return null;
         }
 
+        String diagnostic = nearestDiagnostic(editor, document, target);
         long stamp = modificationStamp(document);
-        AiCodeActionPromptBuilder.Prompt prompt = new AiCodeActionPromptBuilder().fix(context, target.text(), "");
+        AiCodeActionPromptBuilder.Prompt prompt = new AiCodeActionPromptBuilder().fix(context, target.text(), diagnostic);
         Job job = new Job("Fix ABAP selection with AI") {
             @Override
             protected IStatus run(IProgressMonitor monitor) {
                 try {
                     String replacement = AiRuntime.get().completeCodeAction(context, prompt.system(), prompt.user(), monitor).content();
                     if (replacement == null || replacement.isBlank() || replacement.equals(target.text())) return Status.OK_STATUS;
-                    Display.getDefault().asyncExec(() -> previewAndApply(editor, document, target, replacement, stamp));
+                    Display.getDefault().asyncExec(() -> previewAndApply(editor, document, target, replacement, stamp, diagnostic));
                 } catch (ApiException error) {
                     AiPlugin.logError("AI fix failed: " + error.getMessage(), error);
                 } catch (Exception error) {
@@ -78,7 +82,46 @@ public final class AiFixSelectionHandler extends AbstractHandler {
         return null;
     }
 
-    private static void previewAndApply(ITextEditor editor, IDocument document, Target target, String replacement, long stamp) {
+    private static String nearestDiagnostic(ITextEditor editor, IDocument document, Target target) {
+        if (editor == null || editor.getEditorInput() == null) return "";
+        IFile file = editor.getEditorInput().getAdapter(IFile.class);
+        if (file == null || !file.exists()) return "";
+        try {
+            int targetLine = document.getLineOfOffset(Math.max(0, Math.min(target.offset(), document.getLength()))) + 1;
+            IMarker best = null;
+            int bestDistance = Integer.MAX_VALUE;
+            for (IMarker marker : file.findMarkers(IMarker.PROBLEM, true, IResource.DEPTH_ZERO)) {
+                int start = marker.getAttribute(IMarker.CHAR_START, -1);
+                int end = marker.getAttribute(IMarker.CHAR_END, -1);
+                boolean overlaps = start >= 0 && end >= start
+                    && start < target.offset() + Math.max(1, target.length())
+                    && end > target.offset();
+                int line = marker.getAttribute(IMarker.LINE_NUMBER, -1);
+                int distance = overlaps ? 0 : line > 0 ? Math.abs(line - targetLine) : Integer.MAX_VALUE;
+                if (distance < bestDistance) {
+                    best = marker;
+                    bestDistance = distance;
+                    if (distance == 0) break;
+                }
+            }
+            if (best == null || bestDistance > 2) return "";
+            String message = best.getAttribute(IMarker.MESSAGE, "");
+            int severity = best.getAttribute(IMarker.SEVERITY, IMarker.SEVERITY_INFO);
+            String label = severity == IMarker.SEVERITY_ERROR ? "Error" : severity == IMarker.SEVERITY_WARNING ? "Warning" : "Problem";
+            return message.isBlank() ? "" : label + ": " + message;
+        } catch (Exception unavailable) {
+            return "";
+        }
+    }
+
+    private static void previewAndApply(
+        ITextEditor editor,
+        IDocument document,
+        Target target,
+        String replacement,
+        long stamp,
+        String diagnostic
+    ) {
         if (editor == null || document == null) return;
         if (stamp != IDocumentExtension4.UNKNOWN_MODIFICATION_STAMP && modificationStamp(document) != stamp) {
             MessageDialog.openInformation(editor.getSite().getShell(), "AI Fix", "The document changed while the fix was being generated, so the result was not applied.");
@@ -90,9 +133,12 @@ public final class AiFixSelectionHandler extends AbstractHandler {
             return;
         }
 
-        String preview = "Current:\n" + clip(target.text()) + "\n\nAI replacement:\n" + clip(replacement)
-            + "\n\nApply this replacement?";
-        if (!MessageDialog.openQuestion(editor.getSite().getShell(), "AI Fix Preview", preview)) return;
+        StringBuilder preview = new StringBuilder();
+        if (diagnostic != null && !diagnostic.isBlank()) preview.append(diagnostic).append("\n\n");
+        preview.append("Current:\n").append(clip(target.text()))
+            .append("\n\nAI replacement:\n").append(clip(replacement))
+            .append("\n\nApply this replacement?");
+        if (!MessageDialog.openQuestion(editor.getSite().getShell(), "AI Fix Preview", preview.toString())) return;
         try {
             document.replace(target.offset(), target.length(), replacement);
             editor.selectAndReveal(target.offset(), replacement.length());
