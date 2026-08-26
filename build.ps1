@@ -1,7 +1,7 @@
 param(
     [string]$EclipseRoot = "",
     [string]$JdkRoot = "",
-    [string]$Version = "0.3.0"
+    [string]$Version = "0.4.0"
 )
 
 $ErrorActionPreference = "Stop"
@@ -99,6 +99,8 @@ if ($LASTEXITCODE -ne 0) { throw "Test compilation failed." }
 if ($LASTEXITCODE -ne 0) { throw "Core tests failed." }
 & $Java -ea -cp "$TestClasses;$Classes;$EclipseRoot\plugins\*" com.casla.eclipse.ai.tests.AdaptiveLearningTests
 if ($LASTEXITCODE -ne 0) { throw "Adaptive learning tests failed." }
+& $Java -ea -cp "$TestClasses;$Classes;$EclipseRoot\plugins\*" com.casla.eclipse.ai.tests.CompletionEditPlannerTests
+if ($LASTEXITCODE -ne 0) { throw "Completion edit planner tests failed." }
 if (-not [string]::IsNullOrWhiteSpace($env:AI_CODE_ASSISTANT_API_KEY)) {
     & $Java -ea -cp "$TestClasses;$Classes;$EclipseRoot\plugins\*" com.casla.eclipse.ai.tests.LiveEndpointTest
     if ($LASTEXITCODE -ne 0) { throw "Live endpoint test failed." }
