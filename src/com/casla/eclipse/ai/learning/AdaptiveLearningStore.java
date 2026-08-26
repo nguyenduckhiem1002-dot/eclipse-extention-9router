@@ -101,7 +101,10 @@ public final class AdaptiveLearningStore {
     public synchronized int objectCount() { ensureLoaded(); return objectIndex.size(); }
     public synchronized boolean isPaused() { ensureLoaded(); return paused; }
     public synchronized void setPaused(boolean value) { ensureLoaded(); paused = value; save(); }
-    public synchronized boolean isNextEditEnabled() { ensureLoaded(); return nextEditEnabled && !paused; }
+    /** Persisted preference shown in the UI, independent of the global pause flag. */
+    public synchronized boolean isNextEditEnabled() { ensureLoaded(); return nextEditEnabled; }
+    /** Runtime gate: Next Edit is inactive whenever all adaptive learning is paused. */
+    public synchronized boolean shouldTrackNextEdits() { ensureLoaded(); return nextEditEnabled && !paused; }
     public synchronized void setNextEditEnabled(boolean value) { ensureLoaded(); nextEditEnabled = value; save(); }
     public synchronized void setMemoryLimit(int value) { ensureLoaded(); acceptedExamples.setMaxExamples(value); objectIndex.setMaxObjects(value); save(); }
 
