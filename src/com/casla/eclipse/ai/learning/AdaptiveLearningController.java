@@ -19,8 +19,8 @@ import com.casla.eclipse.ai.completion.RelatedFileCollector;
 
 /**
  * Watches the active editor and periodically learns from stable ABAP source.
- * Completion-origin edits go to CompletionFeedbackTracker; manual edits also
- * feed the conservative same-file EditHistoryTracker.
+ * Completion-origin edits go to CompletionFeedbackTracker; manual edits can
+ * also feed the conservative same-file EditHistoryTracker when enabled.
  */
 public final class AdaptiveLearningController implements IPartListener2, IDocumentListener {
     private static final AdaptiveLearningController INSTANCE = new AdaptiveLearningController();
@@ -73,13 +73,17 @@ public final class AdaptiveLearningController implements IPartListener2, IDocume
 
     @Override
     public void documentAboutToBeChanged(DocumentEvent event) {
-        EditHistoryTracker.get().documentAboutToBeChanged(objectKey, language, document, event);
+        if (AdaptiveLearningStore.get().isNextEditEnabled()) {
+            EditHistoryTracker.get().documentAboutToBeChanged(objectKey, language, document, event);
+        }
     }
 
     @Override
     public void documentChanged(DocumentEvent event) {
         boolean aiMutation = CompletionFeedbackTracker.get().documentChanged(objectKey, language, event);
-        EditHistoryTracker.get().documentChanged(objectKey, language, document, event, aiMutation);
+        if (AdaptiveLearningStore.get().isNextEditEnabled()) {
+            EditHistoryTracker.get().documentChanged(objectKey, language, document, event, aiMutation);
+        }
         scheduleLearning();
     }
 
@@ -115,6 +119,7 @@ public final class AdaptiveLearningController implements IPartListener2, IDocume
     }
 
     private void showNextEditSuggestion(EditHistoryTracker.NextEditSuggestion suggestion) {
+        if (!AdaptiveLearningStore.get().isNextEditEnabled()) return;
         ITextEditor activeEditor = editor;
         if (activeEditor == null || suggestion == null) return;
         Display.getDefault().asyncExec(() -> {
