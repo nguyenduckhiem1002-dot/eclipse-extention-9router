@@ -14,6 +14,8 @@ import org.eclipse.ui.IWorkbench;
 import org.eclipse.ui.IWorkbenchPreferencePage;
 
 import com.casla.eclipse.ai.learning.AdaptiveLearningStore;
+import com.casla.eclipse.ai.learning.CompletionFeedbackTracker;
+import com.casla.eclipse.ai.learning.EditHistoryTracker;
 
 /** Controls for local adaptive memory; no telemetry leaves the workstation. */
 public final class AdaptiveLearningPreferencePage extends PreferencePage implements IWorkbenchPreferencePage {
@@ -60,10 +62,17 @@ public final class AdaptiveLearningPreferencePage extends PreferencePage impleme
         actions.setText("Reset");
         actions.setLayout(new GridLayout(4, true));
         actions.setLayoutData(new GridData(SWT.FILL, SWT.TOP, true, false));
-        button(actions, "Reset all", () -> AdaptiveLearningStore.get().reset());
+        button(actions, "Reset all", () -> {
+            AdaptiveLearningStore.get().reset();
+            CompletionFeedbackTracker.get().resetTransient();
+            EditHistoryTracker.get().resetTransient();
+        });
         button(actions, "Examples", () -> AdaptiveLearningStore.get().resetExamples());
         button(actions, "Objects", () -> AdaptiveLearningStore.get().resetObjects());
-        button(actions, "Feedback", () -> AdaptiveLearningStore.get().resetFeedback());
+        button(actions, "Feedback", () -> {
+            AdaptiveLearningStore.get().resetFeedback();
+            CompletionFeedbackTracker.get().resetTransient();
+        });
 
         Group diag = new Group(root, SWT.NONE);
         diag.setText("Diagnostics");
@@ -101,8 +110,10 @@ public final class AdaptiveLearningPreferencePage extends PreferencePage impleme
     public boolean performOk() {
         AdaptiveLearningStore store = AdaptiveLearningStore.get();
         store.setMemoryLimit(memoryLimit.getSelection());
+        boolean nextEditChanged = store.isNextEditEnabled() != nextEditEnabled.getSelection();
         store.setNextEditEnabled(nextEditEnabled.getSelection());
         store.setPaused(!enabled.getSelection());
+        if (nextEditChanged && !nextEditEnabled.getSelection()) EditHistoryTracker.get().resetTransient();
         return true;
     }
 
