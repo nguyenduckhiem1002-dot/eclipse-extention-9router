@@ -102,12 +102,7 @@ public final class AdaptiveLearningStore {
     public synchronized boolean isPaused() { ensureLoaded(); return paused; }
     public synchronized void setPaused(boolean value) { ensureLoaded(); paused = value; save(); }
     public synchronized boolean isNextEditEnabled() { ensureLoaded(); return nextEditEnabled && !paused; }
-    public synchronized void setNextEditEnabled(boolean value) {
-        ensureLoaded();
-        nextEditEnabled = value;
-        if (!value) EditHistoryTracker.get().resetTransient();
-        save();
-    }
+    public synchronized void setNextEditEnabled(boolean value) { ensureLoaded(); nextEditEnabled = value; save(); }
     public synchronized void setMemoryLimit(int value) { ensureLoaded(); acceptedExamples.setMaxExamples(value); objectIndex.setMaxObjects(value); save(); }
 
     public synchronized CompletionFeedbackStats feedbackSnapshot() { ensureLoaded(); return copy(totalFeedback); }
@@ -137,8 +132,9 @@ public final class AdaptiveLearningStore {
 
     public synchronized void resetExamples() { ensureLoaded(); acceptedExamples.reset(); save(); }
     public synchronized void resetObjects() { ensureLoaded(); objectIndex.reset(); save(); }
-    public synchronized void resetFeedback() { ensureLoaded(); totalFeedback.reset(); feedbackByModel.clear(); feedbackByModelContext.clear(); CompletionFeedbackTracker.get().resetTransient(); save(); }
+    public synchronized void resetFeedback() { ensureLoaded(); totalFeedback.reset(); feedbackByModel.clear(); feedbackByModelContext.clear(); save(); }
 
+    /** Resets only persisted/aggregate state. UI/transient trackers reset separately to avoid lock-order inversion. */
     public synchronized void reset() {
         ensureLoaded();
         styleProfile.reset();
@@ -148,8 +144,6 @@ public final class AdaptiveLearningStore {
         acceptedExamples.reset();
         objectIndex.reset();
         lastDocumentHashes.clear();
-        CompletionFeedbackTracker.get().resetTransient();
-        EditHistoryTracker.get().resetTransient();
         save();
     }
 
