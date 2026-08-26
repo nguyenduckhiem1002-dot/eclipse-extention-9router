@@ -64,9 +64,20 @@ public final class AdaptiveLearningStore {
     }
 
     public synchronized void rememberAcceptedExample(String objectKey, String structureHint, String completion, String model) {
+        rememberAcceptedExample(objectKey, structureHint, "unknown", "", completion, model);
+    }
+
+    public synchronized void rememberAcceptedExample(
+        String objectKey,
+        String structureHint,
+        String contextBucket,
+        String contextShape,
+        String completion,
+        String model
+    ) {
         ensureLoaded();
         if (paused) return;
-        acceptedExamples.remember(objectKey, structureHint, completion, model);
+        acceptedExamples.remember(objectKey, structureHint, contextBucket, contextShape, completion, model);
         save();
     }
 
@@ -199,19 +210,29 @@ public final class AdaptiveLearningStore {
     }
 
     private static CompletionFeedbackStats copy(CompletionFeedbackStats source) {
-        Properties p = new Properties(); source.store(p, "copy."); CompletionFeedbackStats result = new CompletionFeedbackStats(); result.load(p, "copy."); return result;
+        Properties p = new Properties();
+        source.store(p, "copy.");
+        CompletionFeedbackStats result = new CompletionFeedbackStats();
+        result.load(p, "copy.");
+        return result;
     }
     private static String encode(String value) { return Base64.getUrlEncoder().withoutPadding().encodeToString(clean(value).getBytes(StandardCharsets.UTF_8)); }
     private static String encodeModelIndex(Iterable<String> values) { StringBuilder b = new StringBuilder(); for (String value : values) { if (b.length() > 0) b.append(','); b.append(encode(value)); } return b.toString(); }
     private static java.util.List<String> decodeModelIndex(String value) {
         if (value == null || value.isBlank()) return java.util.List.of();
         java.util.List<String> result = new java.util.ArrayList<>();
-        for (String encoded : value.split(",")) { if (encoded.isBlank()) continue; try { result.add(new String(Base64.getUrlDecoder().decode(encoded), StandardCharsets.UTF_8)); } catch (IllegalArgumentException ignored) {} }
+        for (String encoded : value.split(",")) {
+            if (encoded.isBlank()) continue;
+            try { result.add(new String(Base64.getUrlDecoder().decode(encoded), StandardCharsets.UTF_8)); }
+            catch (IllegalArgumentException ignored) {}
+        }
         return result;
     }
     private static String clean(String value) { return value == null ? "" : value.trim(); }
     private static Path storagePath() {
-        AiPlugin plugin = AiPlugin.getDefault(); if (plugin == null) return null;
-        try { return plugin.getStateLocation().append("adaptive-learning.properties").toFile().toPath(); } catch (RuntimeException unavailable) { return null; }
+        AiPlugin plugin = AiPlugin.getDefault();
+        if (plugin == null) return null;
+        try { return plugin.getStateLocation().append("adaptive-learning.properties").toFile().toPath(); }
+        catch (RuntimeException unavailable) { return null; }
     }
 }
