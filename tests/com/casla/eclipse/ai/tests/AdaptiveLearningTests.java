@@ -9,6 +9,8 @@ import com.casla.eclipse.ai.api.ModelInfo;
 import com.casla.eclipse.ai.completion.CodeContext;
 import com.casla.eclipse.ai.completion.CompletionReranker;
 import com.casla.eclipse.ai.completion.CursorContextType;
+import com.casla.eclipse.ai.completion.abap.AbapCompletionQualityGate;
+import com.casla.eclipse.ai.learning.AbapStructuralSignature;
 import com.casla.eclipse.ai.learning.AcceptedExampleMemory;
 import com.casla.eclipse.ai.learning.AdaptiveLearningStore;
 import com.casla.eclipse.ai.learning.CompletionContextClassifier;
@@ -26,10 +28,13 @@ public final class AdaptiveLearningTests {
     public static void main(String[] args) {
         learnsModernInlineStyle();
         learnsClassicStyle();
+        learnsMethodCallLayout();
         roundTripsPersistence();
         feedbackStatsRoundTrip();
         feedbackRatesAreStable();
         acceptedExampleRetrieval();
+        structuralExampleRetrieval();
+        abapQualityGateFixesSafeSpacing();
         objectIndexRetrievalAndPersistence();
         contextClassifierFindsRapAndSql();
         adaptiveRouterLearnsBetterModel();
@@ -78,6 +83,28 @@ public final class AdaptiveLearningTests {
         check(hints.contains("READ TABLE"), "classic profile should preserve READ TABLE style");
     }
 
+    private static void learnsMethodCallLayout() {
+        ProjectStyleProfile profile = new ProjectStyleProfile();
+        String source = """
+            METHOD run.
+              lo_service->execute(
+                EXPORTING
+                  iv_order = lv_order
+                  iv_test  = abap_false
+                IMPORTING
+                  es_result = ls_result
+              ).
+            ENDMETHOD.
+            """;
+        profile.observeAbap(source);
+        profile.observeAbap(source.replace("execute", "save"));
+        profile.observeAbap(source.replace("execute", "validate"));
+        String hints = profile.promptHints();
+        check(hints.contains("multi-line method calls"), "profile should learn multi-line call style");
+        check(hints.contains("EXPORTING"), "profile should learn parameter-section layout");
+        check(hints.contains("closing )."), "profile should learn closing parenthesis layout");
+    }
+
     private static void roundTripsPersistence() {
         ProjectStyleProfile original = new ProjectStyleProfile();
         String source = "METHOD run.\nDATA(value) = VALUE string( ).\nENDMETHOD.";
@@ -121,6 +148,34 @@ public final class AdaptiveLearningTests {
         check(!result.isEmpty() && result.get(0).snippet().contains("MODIFY ENTITIES"), "RAP accepted example should rank first");
         Properties p = new Properties(); memory.store(p); AcceptedExampleMemory restored = new AcceptedExampleMemory(); restored.load(p);
         check(restored.size() == 2, "accepted examples should persist");
+    }
+
+    private static void structuralExampleRetrieval() {
+        AcceptedExampleMemory memory = new AcceptedExampleMemory();
+        String orderContext = "LOOP AT lt_order INTO ls_order.\n  IF ls_order-status = 'A'.\n";
+        String itemContext = "LOOP AT lt_item INTO ls_item.\n  IF ls_item-status = 'A'.\n";
+        memory.remember(
+            "ZCL_ORDER", "METHOD run", "abap-method", AbapStructuralSignature.of(orderContext),
+            "    ls_order-selected = abap_true.", "model-a"
+        );
+        memory.remember(
+            "ZCL_MISC", "METHOD sql", "abap-sql", AbapStructuralSignature.of("SELECT * FROM mara WHERE matnr = iv_matnr"),
+            "INTO TABLE @DATA(lt_mara).", "model-b"
+        );
+        var result = memory.retrieve(context("ZCL_OTHER", "METHOD run", itemContext), 2);
+        check(!result.isEmpty() && result.get(0).snippet().contains("selected"), "identifier-independent structure should retrieve equivalent LOOP pattern");
+    }
+
+    private static void abapQualityGateFixesSafeSpacing() {
+        CodeContext context = context("ZCL", "METHOD run", "");
+        String refined = AbapCompletionQualityGate.refine(
+            "lv_total =lv_net + lv_tax.\nlo_obj=>factory( )->run( iv_text='a=b' ). \" keep =comment",
+            context
+        );
+        check(refined.contains("lv_total = lv_net + lv_tax."), "standalone assignment should gain canonical spaces");
+        check(refined.contains("lo_obj=>factory"), "class selector must not be split");
+        check(refined.contains("iv_text = 'a=b'"), "named parameter should be spaced but literal must stay intact");
+        check(refined.contains("\" keep =comment"), "comment text must not be rewritten");
     }
 
     private static void objectIndexRetrievalAndPersistence() {
