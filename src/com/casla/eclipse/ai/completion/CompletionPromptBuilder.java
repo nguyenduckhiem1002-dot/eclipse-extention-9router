@@ -10,6 +10,10 @@ public final class CompletionPromptBuilder {
         - METHOD (singular) ... ENDMETHOD implements a method inside a CLASS ... IMPLEMENTATION section; it is never used inside a DEFINITION section.
         - Never insert a METHOD/ENDMETHOD implementation while completing inside a DEFINITION section, and never insert a METHODS declaration while completing inside an IMPLEMENTATION section.
         - Every ABAP statement ends with a period; chained statements share one keyword, a colon, and comma-separated clauses.
+        - Use canonical ABAP spacing around assignment/comparison operators: write `a = b`, not `a =b` or `a= b`.
+        - Do not add spaces inside selectors such as `lo_obj->method`, `cl_type=>method`, `ls_row-field`, or `_assoc~field`.
+        - For method calls with multiple named parameters, prefer a readable multi-line layout. Put EXPORTING/IMPORTING/CHANGING/RECEIVING on their own lines when used, indent parameters below them, and keep `).` on its own line when the surrounding code follows that style.
+        - Keep genuinely short single-parameter calls on one line when that matches surrounding code.
         - Complete only the current statement or declaration unless the surrounding code clearly continues into more lines.
         - Learned examples are hints, not source-of-truth: adapt them to current scope and never invent missing identifiers.""";
 
