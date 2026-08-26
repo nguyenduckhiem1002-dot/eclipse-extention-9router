@@ -192,11 +192,7 @@ public final class AiRuntime {
         }
     }
 
-    /**
-     * Runs a bounded code-action prompt (fix/refactor/etc.) through the same
-     * connection, model routing, sanitizer and ABAP quality gates as ordinary
-     * completion, without registering the result as an inline completion.
-     */
+    /** Runs explicit fix/refactor prompts without registering them as inline completions. */
     public CompletionResponse completeCodeAction(
         CodeContext context,
         String systemPrompt,
@@ -212,7 +208,7 @@ public final class AiRuntime {
         try {
             CompletionResponse response = client.complete(activeConnection, model, systemPrompt, userPrompt, settings, monitor, false);
             ensureCurrent(requestGeneration);
-            CompletionResponse sanitized = withSelectedModel(sanitizeOrThrow(response, context), model);
+            CompletionResponse sanitized = withSelectedModel(sanitizeCodeActionOrThrow(response, context), model);
             markKnownGood(model);
             return sanitized;
         } catch (ApiException firstError) {
@@ -224,7 +220,7 @@ public final class AiRuntime {
             if (fallback.isBlank()) throw firstError;
             CompletionResponse response = client.complete(activeConnection, fallback, systemPrompt, userPrompt, settings, monitor, false);
             ensureCurrent(requestGeneration);
-            CompletionResponse sanitized = withSelectedModel(sanitizeOrThrow(response, context), fallback);
+            CompletionResponse sanitized = withSelectedModel(sanitizeCodeActionOrThrow(response, context), fallback);
             markKnownGood(fallback);
             return sanitized;
         }
@@ -238,6 +234,35 @@ public final class AiRuntime {
     private CompletionResponse sanitizeOrThrow(CompletionResponse response, CodeContext context) throws ApiException {
         String insertion = new CompletionSanitizer().sanitize(response.content(), context);
         insertion = AbapCompletionQualityGate.refine(insertion, context);
+        return validatedResponse(response, context, insertion);
+    }
+
+    private CompletionResponse sanitizeCodeActionOrThrow(CompletionResponse response, CodeContext context) throws ApiException {
+        // Replacement code must not be passed through inline echo trimming:
+        // a valid fix may legitimately start/end with source that also appears
+        // outside the target. Give CompletionSanitizer an empty cursor window,
+        // then reuse ABAP lexical and structural safety gates.
+        CodeContext isolated = new CodeContext(
+            context.projectName(),
+            context.filePath(),
+            context.language(),
+            context.packageName(),
+            context.imports(),
+            context.structureHint(),
+            "",
+            "",
+            0,
+            context.modificationStamp(),
+            "code-action",
+            context.cursorContext(),
+            context.relatedFiles()
+        );
+        String insertion = new CompletionSanitizer().sanitize(response.content(), isolated);
+        insertion = AbapCompletionQualityGate.refine(insertion, context);
+        return validatedResponse(response, context, insertion);
+    }
+
+    private CompletionResponse validatedResponse(CompletionResponse response, CodeContext context, String insertion) throws ApiException {
         if (insertion.isBlank() || ValidationPipeline.isUnsafe(insertion, context.structureHint())) {
             throw new ApiException(200, "EMPTY_COMPLETION", "The model returned an empty or unsafe completion.");
         }
