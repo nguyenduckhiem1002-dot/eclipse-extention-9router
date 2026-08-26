@@ -26,10 +26,10 @@ public final class ProjectStyleProfile {
         "(?i)\\b(?:DATA|IF|ELSEIF|ELSE|ENDIF|LOOP|ENDLOOP|SELECT|ENDSELECT|METHOD|ENDMETHOD|READ|TABLE|VALUE|RETURNING|IMPORTING|EXPORTING|CHANGING|RECEIVING)\\b"
     );
     private static final Pattern METHOD_CALL = Pattern.compile("(?i)(?:->|=>)\\s*[a-z0-9_]+\\s*\\(");
-    private static final Pattern MULTILINE_METHOD_CALL = Pattern.compile("(?im)(?:->|=>)\\s*[a-z0-9_]+\\s*\\(\\s*$");
-    private static final Pattern PARAMETER_SECTION_LINE = Pattern.compile("(?im)^\\s*(?:EXPORTING|IMPORTING|CHANGING|RECEIVING)\\s*$");
-    private static final Pattern PARAMETER_SECTION_INLINE = Pattern.compile("(?i)\\b(?:EXPORTING|IMPORTING|CHANGING|RECEIVING)\\s+[a-z0-9_]+\\s*=");
-    private static final Pattern CLOSING_PAREN_OWN_LINE = Pattern.compile("(?m)^\\s*\\)\\.\\s*$");
+    private static final Pattern MULTILINE_METHOD_CALL = Pattern.compile("(?im)(?:->|=>)\\s*[a-z0-9_]+\\s*\\([ \\t]*$");
+    private static final Pattern PARAMETER_SECTION_LINE = Pattern.compile("(?im)^[ \\t]*(?:EXPORTING|IMPORTING|CHANGING|RECEIVING)[ \\t]*$");
+    private static final Pattern PARAMETER_SECTION_INLINE = Pattern.compile("(?i)\\b(?:EXPORTING|IMPORTING|CHANGING|RECEIVING)[ \\t]+[a-z0-9_]+[ \\t]*=");
+    private static final Pattern CLOSING_PAREN_OWN_LINE = Pattern.compile("(?m)^[ \\t]*\\)\\.[ \\t]*$");
 
     private int observations;
     private double inlineDeclaration;
