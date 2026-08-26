@@ -2,10 +2,10 @@
 <feature
     id="com.casla.eclipse.ai.feature"
     label="Casla AI Code Assistant"
-    version="0.3.0"
+    version="0.4.0"
     provider-name="Casla Group">
   <description>
-    AI-assisted Java code completion for Eclipse using an OpenAI-compatible endpoint.
+    AI-assisted ABAP and Java code completion for Eclipse, including adaptive workspace learning and ABAP code actions.
   </description>
   <copyright>Copyright (c) 2026 Casla Group.</copyright>
   <license url="LICENSE">MIT License</license>
