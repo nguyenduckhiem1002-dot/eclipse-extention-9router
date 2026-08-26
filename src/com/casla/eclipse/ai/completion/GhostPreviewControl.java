@@ -9,10 +9,10 @@ import org.eclipse.swt.widgets.Monitor;
 import org.eclipse.swt.widgets.Shell;
 
 /**
- * Floating, non-document preview for multi-line ghost text. It never changes
- * StyledText layout, so existing source lines are not pushed, indented or
- * painted over. The editor keeps keyboard focus; Tab/word/line acceptance is
- * still owned by GhostTextController.
+ * Floating, non-document preview for multi-line or mid-line ghost text. It
+ * never changes StyledText layout, so existing source lines are not pushed,
+ * indented or painted over. The editor keeps keyboard focus; Tab/word/line
+ * acceptance is still owned by GhostTextController.
  */
 final class GhostPreviewControl {
     private static final int MAX_VISIBLE_LINES = 14;
@@ -22,7 +22,7 @@ final class GhostPreviewControl {
     private StyledText preview;
 
     void show(StyledText editor, int widgetOffset, String suggestion) {
-        if (editor == null || editor.isDisposed() || suggestion == null || !suggestion.contains("\n")) {
+        if (editor == null || editor.isDisposed() || suggestion == null || suggestion.isBlank()) {
             hide();
             return;
         }
@@ -46,7 +46,7 @@ final class GhostPreviewControl {
         }
         int editorWidth = Math.max(MIN_WIDTH, editor.getClientArea().width);
         int width = Math.min(MAX_WIDTH, Math.min(longest, Math.max(MIN_WIDTH, (int) (editorWidth * 0.82))));
-        int visibleLines = Math.max(2, Math.min(MAX_VISIBLE_LINES, lines.length));
+        int visibleLines = Math.max(1, Math.min(MAX_VISIBLE_LINES, lines.length));
         int height = visibleLines * lineHeight + 14;
 
         Point local = editor.getLocationAtOffset(Math.max(0, Math.min(widgetOffset, editor.getCharCount())));
