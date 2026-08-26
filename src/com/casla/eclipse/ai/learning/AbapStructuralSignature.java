@@ -13,7 +13,7 @@ public final class AbapStructuralSignature {
     private static final Pattern TOKEN = Pattern.compile(
         "[A-Za-z_][A-Za-z0-9_]*|\\d+(?:\\.\\d+)?|->|=>|<=|>=|<>|[()\\[\\],.:=+*/~\\-]"
     );
-    private static final Set<String> KEYWORDS = Set.of(
+    private static final Set<String> KEYWORDS = Set.copyOf(java.util.List.of(
         "DATA", "FINAL", "FIELD-SYMBOLS", "CONSTANTS", "TYPES", "TYPE", "LIKE",
         "IF", "ELSEIF", "ELSE", "ENDIF", "CASE", "WHEN", "ENDCASE", "CHECK", "RETURN",
         "LOOP", "AT", "INTO", "ASSIGNING", "REFERENCE", "ENDLOOP", "READ", "TABLE", "WITH", "KEY",
@@ -24,7 +24,7 @@ public final class AbapStructuralSignature {
         "TRY", "CATCH", "CLEANUP", "ENDTRY", "RAISE", "EXCEPTION", "MESSAGE",
         "MODIFY", "ENTITIES", "ENTITY", "READ", "IN", "LOCAL", "MODE", "FAILED", "REPORTED", "MAPPED",
         "AND", "OR", "NOT", "IS", "INITIAL", "BOUND", "INSTANCE", "OF", "ABAP_TRUE", "ABAP_FALSE"
-    );
+    ));
 
     private AbapStructuralSignature() {}
 
