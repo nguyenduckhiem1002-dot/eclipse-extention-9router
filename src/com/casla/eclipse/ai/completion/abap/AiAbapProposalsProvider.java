@@ -23,6 +23,7 @@ import com.casla.eclipse.ai.client.ApiException;
 import com.casla.eclipse.ai.client.CompletionResponse;
 import com.casla.eclipse.ai.completion.CodeContext;
 import com.casla.eclipse.ai.completion.CompletionCache;
+import com.casla.eclipse.ai.completion.CompletionEditPlanner;
 import com.casla.eclipse.ai.completion.GhostTextController;
 import com.casla.eclipse.ai.preferences.AiPreferences;
 import com.casla.eclipse.ai.runtime.AiRuntime;
@@ -50,10 +51,6 @@ import com.casla.eclipse.ai.runtime.AiRuntime;
 public final class AiAbapProposalsProvider implements IClientProposalsProvider {
     private static final long MAX_BLOCK_MILLIS = 300;
 
-    // Daemon threads: nothing outside this class references AiPlugin, so
-    // there is no shutdown hook to release this executor explicitly without
-    // creating a hard dependency from the core plugin onto ADT's optional
-    // classes. Daemon threads exit with the JVM on their own.
     private static final ExecutorService EXECUTOR = Executors.newFixedThreadPool(2, runnable -> {
         Thread thread = new Thread(runnable, "ai-abap-completion");
         thread.setDaemon(true);
@@ -66,20 +63,13 @@ public final class AiAbapProposalsProvider implements IClientProposalsProvider {
     @Override
     public List<ICompletionProposal> getClientCompletionProposals(ITextViewer viewer, int offset) {
         RuntimeSnapshot runtime = AiRuntime.get().snapshot();
-        if (!runtime.canComplete()) {
-            return List.of();
-        }
+        if (!runtime.canComplete()) return List.of();
 
         IDocument document = viewer == null ? null : viewer.getDocument();
-        if (document == null) {
-            return List.of();
-        }
+        if (document == null) return List.of();
 
-        // Tier 1: deterministic, no network, no cache needed.
         String local = AbapLocalCompleter.suggest(document, offset);
-        if (!local.isBlank()) {
-            return List.of(buildLocalProposal(local, offset));
-        }
+        if (!local.isBlank()) return List.of(buildLocalProposal(local, offset));
 
         CodeContext context;
         try {
@@ -102,10 +92,10 @@ public final class AiAbapProposalsProvider implements IClientProposalsProvider {
 
         try {
             String insertion = future.get(MAX_BLOCK_MILLIS, TimeUnit.MILLISECONDS);
-            return insertion == null || insertion.isBlank() ? List.of() : List.of(buildProposal(insertion, context, runtime));
+            return insertion == null || insertion.isBlank()
+                ? List.of()
+                : List.of(buildProposal(insertion, context, runtime));
         } catch (TimeoutException stillRunning) {
-            // The popup's patience ran out, not the request itself: when it
-            // lands, offer it to ghost text instead of throwing it away.
             IDocument requestDocument = document;
             future.thenAccept(insertion -> GhostTextController.get().offerCompletion(requestDocument, context, insertion));
             return List.of();
@@ -129,10 +119,7 @@ public final class AiAbapProposalsProvider implements IClientProposalsProvider {
     private static String fetch(CodeContext context, IDocument document) {
         try {
             CompletionResponse response = AiRuntime.get().complete(context, new NullProgressMonitor(), true);
-            if (!context.isCurrent(document)) {
-                return "";
-            }
-            // Already sanitized (and confirmed non-blank) by AiRuntime.complete().
+            if (!context.isCurrent(document)) return "";
             return response.content();
         } catch (OperationCanceledException ignored) {
             return "";
@@ -145,18 +132,18 @@ public final class AiAbapProposalsProvider implements IClientProposalsProvider {
         }
     }
 
-    /** EMPTY_COMPLETION is a routine "model had nothing to add" outcome, not a fault -- logging it as an error is just noise. */
     private static void logCompletionError(ApiException error) {
         if ("EMPTY_COMPLETION".equals(error.errorCode())) return;
         AiPlugin.logError("ABAP AI completion failed: " + error.getMessage(), error);
     }
 
     private static ICompletionProposal buildProposal(String insertion, CodeContext context, RuntimeSnapshot runtime) {
+        CompletionEditPlanner.Plan plan = CompletionEditPlanner.plan(insertion, context.afterCursor());
         return new CompletionProposal(
-            insertion,
+            plan.text(),
             context.cursorOffset(),
-            0,
-            insertion.length(),
+            plan.replaceLength(),
+            plan.text().length(),
             null,
             "AI suggestion · " + runtime.resolvedModelId(),
             null,
@@ -164,7 +151,6 @@ public final class AiAbapProposalsProvider implements IClientProposalsProvider {
         );
     }
 
-    /** Tier 1 answers are deterministic, not AI-generated -- labeled distinctly rather than implying a model produced them. */
     private static ICompletionProposal buildLocalProposal(String insertion, int offset) {
         return new CompletionProposal(
             insertion, offset, 0, insertion.length(), null, "AI suggestion · local", null, "Deterministic block completion"
