@@ -52,16 +52,20 @@ import com.casla.eclipse.ai.runtime.AiRuntime;
 
 /**
  * Copilot-style inline ghost text with full multi-line preview, word/line
- * acceptance, caching, and context awareness.
+ * acceptance, caching, context awareness, and conservative mid-line edits.
  *
- * Single-line suggestions are painted inline. Multi-line suggestions keep the
- * first line inline and render the complete block in GhostPreviewControl,
- * which floats over the editor without changing StyledText layout.
+ * Single-line insertions on an empty line tail are painted inline. Multi-line
+ * suggestions and any suggestion that would overlap existing same-line source
+ * are rendered in GhostPreviewControl instead of painting over real code.
  */
 public final class GhostTextController implements IPartListener2, IDocumentListener {
     private static final GhostTextController INSTANCE = new GhostTextController();
 
-    public record Ghost(int modelOffset, String text) {}
+    public record Ghost(int modelOffset, String text, int replaceLength, boolean suppressInline) {
+        public Ghost(int modelOffset, String text) {
+            this(modelOffset, text, 0, false);
+        }
+    }
 
     private final class TicketMonitor extends NullProgressMonitor {
         private final long ticketAtStart;
@@ -197,7 +201,9 @@ public final class GhostTextController implements IPartListener2, IDocumentListe
         Ghost current = ghost;
         if (current != null) {
             String inserted = event.getText();
-            boolean plainInsertAtGhost = event.getLength() == 0
+            boolean plainInsertAtGhost = !current.suppressInline()
+                && current.replaceLength() == 0
+                && event.getLength() == 0
                 && event.getOffset() == current.modelOffset()
                 && inserted != null && !inserted.isEmpty();
             if (plainInsertAtGhost && current.text().startsWith(inserted)) {
@@ -270,7 +276,7 @@ public final class GhostTextController implements IPartListener2, IDocumentListe
         String cacheKey = cacheKey(context, false);
         String cached = CompletionCache.get().get(cacheKey);
         if (cached != null && !cached.isBlank()) {
-            showGhost(new Ghost(caretModel, cached));
+            showGhost(plannedGhost(context, cached));
             return;
         }
 
@@ -301,7 +307,12 @@ public final class GhostTextController implements IPartListener2, IDocumentListe
         if (modificationStamp(document) != context.modificationStamp()) return;
         int caretNow = widgetToModel(widget.getCaretOffset());
         if (caretNow != context.cursorOffset()) return;
-        showGhost(new Ghost(context.cursorOffset(), insertion));
+        showGhost(plannedGhost(context, insertion));
+    }
+
+    private static Ghost plannedGhost(CodeContext context, String insertion) {
+        CompletionEditPlanner.Plan plan = CompletionEditPlanner.plan(insertion, context.afterCursor());
+        return new Ghost(context.cursorOffset(), plan.text(), plan.replaceLength(), plan.suppressInline());
     }
 
     public static String cacheKey(CodeContext context, boolean singleLine) {
@@ -380,7 +391,7 @@ public final class GhostTextController implements IPartListener2, IDocumentListe
         if (document == null || widget == null || widget.isDisposed()) return;
         accepting = true;
         try {
-            document.replace(current.modelOffset(), 0, current.text());
+            document.replace(current.modelOffset(), current.replaceLength(), current.text());
             int widgetEnd = modelToWidget(current.modelOffset() + current.text().length());
             if (widgetEnd >= 0) widget.setCaretOffset(widgetEnd);
         } catch (BadLocationException stale) {
@@ -395,30 +406,46 @@ public final class GhostTextController implements IPartListener2, IDocumentListe
 
     private void acceptWord(Ghost current) {
         String word = extractNextWord(current.text());
-        if (!word.isEmpty()) acceptPartial(current, word);
+        if (!word.isEmpty()) acceptPartial(current, safePartialPortion(current, word));
     }
 
     private void acceptLine(Ghost current) {
         String line = extractNextLine(current.text());
-        if (!line.isEmpty()) acceptPartial(current, line);
+        if (!line.isEmpty()) acceptPartial(current, safePartialPortion(current, line));
+    }
+
+    private static String safePartialPortion(Ghost current, String requested) {
+        if (current.replaceLength() <= 0 || requested.length() >= current.replaceLength()) return requested;
+        int required = Math.min(current.replaceLength(), current.text().length());
+        return current.text().substring(0, required);
     }
 
     private void acceptPartial(Ghost current, String portion) {
         if (document == null || widget == null || widget.isDisposed()) return;
         accepting = true;
         try {
-            document.replace(current.modelOffset(), 0, portion);
+            int replaceLength = current.replaceLength() > 0
+                ? Math.min(current.replaceLength(), portion.length())
+                : 0;
+            document.replace(current.modelOffset(), replaceLength, portion);
             int newModelOffset = current.modelOffset() + portion.length();
             int widgetEnd = modelToWidget(newModelOffset);
             if (widgetEnd >= 0) widget.setCaretOffset(widgetEnd);
+
             String remainder = current.text().substring(portion.length());
+            int remainingReplace = Math.max(0, current.replaceLength() - portion.length());
             if (remainder.isEmpty()) {
                 ghost = null;
                 preview.hide();
                 widget.redraw();
                 scheduleFetch(50);
             } else {
-                moveGhost(new Ghost(newModelOffset, remainder));
+                moveGhost(new Ghost(
+                    newModelOffset,
+                    remainder,
+                    remainingReplace,
+                    remainingReplace > 0 || hasNonBlankLineTail(newModelOffset)
+                ));
             }
         } catch (BadLocationException stale) {
             clearGhost();
@@ -473,7 +500,8 @@ public final class GhostTextController implements IPartListener2, IDocumentListe
 
     private void refreshPreview() {
         Ghost current = ghost;
-        if (current == null || widget == null || widget.isDisposed() || !current.text().contains("\n")) {
+        if (current == null || widget == null || widget.isDisposed()
+            || (!current.suppressInline() && !current.text().contains("\n"))) {
             preview.hide();
             return;
         }
@@ -500,7 +528,7 @@ public final class GhostTextController implements IPartListener2, IDocumentListe
 
     private void paintGhost(PaintEvent event) {
         Ghost current = ghost;
-        if (current == null || widget == null || widget.isDisposed()) return;
+        if (current == null || current.suppressInline() || widget == null || widget.isDisposed()) return;
         int widgetOffset = modelToWidget(current.modelOffset());
         if (widgetOffset < 0 || widgetOffset > widget.getCharCount()) return;
         Point location = widget.getLocationAtOffset(widgetOffset);
@@ -511,13 +539,43 @@ public final class GhostTextController implements IPartListener2, IDocumentListe
     }
 
     private boolean isEligibleCursorPosition(int modelOffset) {
+        if (document == null || widget == null || widget.isDisposed() || widget.getSelectionCount() > 0) return false;
         try {
             int line = document.getLineOfOffset(modelOffset);
             IRegion info = document.getLineInformation(line);
             String tail = document.get(modelOffset, info.getOffset() + info.getLength() - modelOffset);
-            return tail.isBlank();
+            if (tail.isBlank()) return true;
+
+            // Keep non-ABAP behavior unchanged; mid-line support is intentionally
+            // enabled first for the language whose syntax/context we validate.
+            if (!"ABAP".equals(currentLanguage())) return false;
+            if (ContextExtractor.detectCursorContext(document.get(), modelOffset, "ABAP") != CursorContextType.CODE) {
+                return false;
+            }
+
+            // Never request a replacement while the caret splits an identifier.
+            // Boundaries such as "method( <caret> )" and before a whole token are safe.
+            if (modelOffset > 0 && modelOffset < document.getLength()) {
+                char before = document.getChar(modelOffset - 1);
+                char after = document.getChar(modelOffset);
+                if (Character.isJavaIdentifierPart(before) && Character.isJavaIdentifierPart(after)) return false;
+            }
+            return true;
         } catch (BadLocationException error) {
             return false;
+        }
+    }
+
+    private boolean hasNonBlankLineTail(int modelOffset) {
+        if (document == null) return false;
+        try {
+            int line = document.getLineOfOffset(Math.max(0, Math.min(modelOffset, document.getLength())));
+            IRegion info = document.getLineInformation(line);
+            int end = info.getOffset() + info.getLength();
+            if (modelOffset > end) return false;
+            return !document.get(modelOffset, end - modelOffset).isBlank();
+        } catch (BadLocationException error) {
+            return true;
         }
     }
 
