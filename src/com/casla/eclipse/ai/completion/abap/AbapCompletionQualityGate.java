@@ -65,15 +65,16 @@ public final class AbapCompletionQualityGate {
 
     private static String refineCodeSegment(String code) {
         if (code.isEmpty()) return code;
-        // Whole comparison operators first, then standalone '='. The latter
-        // explicitly excludes class selectors (=>) and the multi-char forms.
         String value = code
+            // Whole relational operators first.
             .replaceAll("\\s*(<=|>=|<>)\\s*", " $1 ")
-            .replaceAll("(?<![<>=])\\s*=\\s*(?![=>])", " = ");
+            // Compound assignment must be handled before standalone '=' so
+            // `x+=1` never becomes the invalid `x + = 1`.
+            .replaceAll("\\s*([+\\-*/])=\\s*", " $1= ")
+            // Standalone assignment/comparison '=' only; explicitly exclude
+            // class selector => and the left halves of compound operators.
+            .replaceAll("(?<![<>=+\\-*/:])\\s*=\\s*(?![=>])", " = ");
 
-        // Never disturb indentation at the start of a line. The regex above
-        // can only introduce one leading space if the segment itself starts
-        // with an operator, which is not a useful ABAP completion shape.
         int originalIndent = leadingWhitespace(code);
         int newIndent = leadingWhitespace(value);
         if (newIndent != originalIndent && originalIndent > 0) {
